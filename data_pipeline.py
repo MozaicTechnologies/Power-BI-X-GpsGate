@@ -50,7 +50,7 @@ def fetch_from_gpsgate_api(base_url, token, path):
     
     try:
         response = requests.post(
-            'https://fleetdashboard-ali-hxel.onrender.com/api',
+            'https://powerbixgpsgatexgdriver.onrender.com/api',
             data=form_body,
             timeout=30
         )
@@ -214,38 +214,6 @@ def get_event_rules():
         print(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
-
-# @pipeline_bp.route('/weekly-schedule', methods=['POST'])
-# def get_weekly_schedule():
-#     """Generate weekly schedule from start date to today"""
-#     try:
-#         data = request.form or request.get_json()
-        
-#         # Use provided dates or defaults
-#         start_date_str = data.get('start_date', '2025-01-01')
-#         start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
-#         today = datetime.utcnow().date()
-        
-#         weeks = []
-#         current = start_date
-        
-#         while current + timedelta(days=6) <= today:
-#             week_end = current + timedelta(days=6)
-#             weeks.append({
-#                 'week_start': current.strftime('%Y-%m-%dT00:00:00Z'),
-#                 'week_end': week_end.strftime('%Y-%m-%dT23:59:59Z'),
-#                 'start_date': current.isoformat(),
-#                 'end_date': week_end.isoformat()
-#             })
-#             current += timedelta(days=7)
-        
-#         print(f"Generated {len(weeks)} weeks")
-#         return jsonify({'weeks': weeks}), 200
-    
-#     except Exception as e:
-#         print(f"Error in /weekly-schedule: {str(e)}")
-#         return jsonify({"error": str(e)}), 500
-
 @pipeline_bp.route('/weekly-schedule', methods=['POST'])
 def get_weekly_schedule():
     """Generate weekly schedule from start date to today"""
@@ -362,7 +330,7 @@ def process_event_data(event_name, response_key):
                     render_payload['event_id'] = event_id
                 
                 render_resp = requests.post(
-                    'https://fleetdashboard-ali-hxel.onrender.com/render',
+                    'https://powerbixgpsgatexgdriver.onrender.com/render',
                     data=render_payload,
                     timeout=20
                 )
@@ -386,7 +354,7 @@ def process_event_data(event_name, response_key):
                 }
                 
                 result_resp = requests.post(
-                    'https://fleetdashboard-ali-hxel.onrender.com/result',
+                    'https://powerbixgpsgatexgdriver.onrender.com/result',
                     data=result_payload,
                     timeout=40
                 )
@@ -496,30 +464,25 @@ def get_trip_data():
     """Trip events"""
     return process_event_data("Trip", "trip_events")
 
-
 @pipeline_bp.route('/awh-data', methods=['POST'])
 def get_awh_data():
     """After Working Hours Usage events"""
     return process_event_data("AWH", "awh_events")
-
 
 @pipeline_bp.route('/wh-data', methods=['POST'])
 def get_wh_data():
     """Working Hours Usage events"""
     return process_event_data("WH", "wh_events")
 
-
 @pipeline_bp.route('/ha-data', methods=['POST'])
 def get_ha_data():
     """Harsh Acceleration events"""
     return process_event_data("HA", "ha_events")
 
-
 @pipeline_bp.route('/hb-data', methods=['POST'])
 def get_hb_data():
     """Harsh Braking events"""
     return process_event_data("HB", "hb_events")
-
 
 @pipeline_bp.route('/wu-data', methods=['POST'])
 def get_wu_data():
