@@ -50,7 +50,7 @@ def fetch_from_gpsgate_api(base_url, token, path):
     
     try:
         response = requests.post(
-            'http://127.0.0.1:5000/api',
+            'https://fleetdashboard-ali-hxel.onrender.com/api',
             data=form_body,
             timeout=30
         )
@@ -362,7 +362,7 @@ def process_event_data(event_name, response_key):
                     render_payload['event_id'] = event_id
                 
                 render_resp = requests.post(
-                    'http://127.0.0.1:5000/render',
+                    'https://fleetdashboard-ali-hxel.onrender.com/render',
                     data=render_payload,
                     timeout=20
                 )
@@ -386,7 +386,7 @@ def process_event_data(event_name, response_key):
                 }
                 
                 result_resp = requests.post(
-                    'http://127.0.0.1:5000/result',
+                    'https://fleetdashboard-ali-hxel.onrender.com/result',
                     data=result_payload,
                     timeout=40
                 )
