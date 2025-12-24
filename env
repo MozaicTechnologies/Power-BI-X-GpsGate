@@ -1,6 +1,0 @@
-DATABASE_URL=postgresql://powerbixgpsgatexgdriverpostgre_user:EJzJUk7a8AGjr1BCxXslO1Pc8Eo1oBbt@dpg-d39587nfte5s73ci7as0-a.singapore-postgres.render.com/powerbixgpsgatexgdriverpostgre
-SECRET_KEY=jjkhjhkjvkvjhvjfjcjvhkhgcfjgccg
-GDRIVE_FOLDER_ID=18j7GLGBRCbMb4Ev_bCHP_JKrt2r6w_CZ
-GOOGLE_APPLICATION_CREDENTIALS=power-bi-x-gpsgate-b793752d1634.json
-# SERVER_URL=http://127.0.0.1:5000/
-
