@@ -1,0 +1,159 @@
+#!/usr/bin/env python
+"""
+API endpoint for scheduled backfill (current week data)
+Can be called by external cron services, GitHub Actions, or Render background jobs
+"""
+from flask import Blueprint, jsonify, request
+from datetime import datetime, timedelta
+import os
+
+backfill_api = Blueprint('backfill_api', __name__, url_prefix='/api')
+
+@backfill_api.route('/health', methods=['GET'])
+def health():
+    """Health check endpoint"""
+    return jsonify({
+        'status': 'ok',
+        'service': 'GPS Gate Data Pipeline',
+        'timestamp': datetime.now().isoformat()
+    })
+
+@backfill_api.route('/backfill/current-week', methods=['POST', 'GET'])
+def backfill_current_week():
+    """
+    Trigger backfill for current week data
+    
+    GET: Simple trigger (no auth required for development, add key-based auth for production)
+    POST: With optional week override
+    
+    Query/Body params:
+    - api_key: (optional) Authentication key
+    - week_offset: (optional) Days offset from today (0=current week, -7=last week)
+    
+    Returns:
+    {
+        "success": bool,
+        "week": "2025-01-13 to 2025-01-19",
+        "total_inserted": 12345,
+        "total_duplicates": 10,
+        "total_errors": 5,
+        "stats_by_type": {...}
+    }
+    """
+    
+    # Optional: Validate API key
+    api_key = request.args.get('api_key') or request.get_json(silent=True).get('api_key') if request.is_json else None
+    expected_key = os.environ.get('BACKFILL_API_KEY')
+    
+    if expected_key and api_key != expected_key:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        from application import db
+        from data_pipeline import process_event_data
+        from models import FactTrip
+        
+        # Get week dates
+        today = datetime.now()
+        week_offset = int(request.args.get('week_offset', 0))
+        monday = today - timedelta(days=today.weekday() + week_offset)
+        sunday = monday + timedelta(days=6)
+        
+        endpoints = [
+            ("Trip", "trip_data", "Trip"),
+            ("Speeding", "speeding_data", "Speeding"),
+            ("Idle", "idle_data", "Idle"),
+            ("AWH", "awh_data", "AWH"),
+            ("WH", "wh_data", "WH"),
+            ("HA", "ha_data", "HA"),
+            ("HB", "hb_data", "HB"),
+            ("WU", "wu_data", "WU"),
+        ]
+        
+        all_stats = {}
+        total_inserted = 0
+        total_dupes = 0
+        total_errors = 0
+        
+        for label, response_key, event_name in endpoints:
+            try:
+                result = process_event_data(event_name, response_key, week_start=monday, week_end=sunday)
+                
+                if result and 'db_stats' in result:
+                    stats = result['db_stats']
+                    inserted = stats.get('inserted', 0)
+                    duplicates = stats.get('duplicates', 0)
+                    errors = stats.get('errors', 0)
+                    
+                    all_stats[label] = {
+                        'inserted': inserted,
+                        'duplicates': duplicates,
+                        'errors': errors
+                    }
+                    
+                    total_inserted += inserted
+                    total_dupes += duplicates
+                    total_errors += errors
+            except Exception as e:
+                all_stats[label] = {'error': str(e)}
+        
+        return jsonify({
+            'success': True,
+            'week': f"{monday.strftime('%Y-%m-%d')} to {sunday.strftime('%Y-%m-%d')}",
+            'total_inserted': total_inserted,
+            'total_duplicates': total_dupes,
+            'total_errors': total_errors,
+            'stats_by_type': all_stats,
+            'timestamp': datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@backfill_api.route('/backfill/status', methods=['GET'])
+def backfill_status():
+    """Get status of last backfill"""
+    try:
+        from application import db
+        from models import FactTrip, FactSpeeding, FactIdle, FactAWH, FactWH, FactHA, FactHB, FactWU
+        
+        tables = [
+            ('Trip', FactTrip),
+            ('Speeding', FactSpeeding),
+            ('Idle', FactIdle),
+            ('AWH', FactAWH),
+            ('WH', FactWH),
+            ('HA', FactHA),
+            ('HB', FactHB),
+            ('WU', FactWU),
+        ]
+        
+        stats = {}
+        total_records = 0
+        
+        for name, model in tables:
+            count = db.session.query(model).count()
+            duplicate_count = db.session.query(model).filter_by(is_duplicate=True).count()
+            stats[name] = {
+                'total': count,
+                'duplicates': duplicate_count,
+                'valid': count - duplicate_count
+            }
+            total_records += count
+        
+        return jsonify({
+            'success': True,
+            'total_records': total_records,
+            'stats_by_type': stats,
+            'timestamp': datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500

@@ -20,4 +20,8 @@ def create_app():
 
     Migrate(app, db, render_as_batch=True)
     
+    # Register backfill scheduler API
+    from backfill_scheduler import backfill_api
+    app.register_blueprint(backfill_api)
+    
     return app
