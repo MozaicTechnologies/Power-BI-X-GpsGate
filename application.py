@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()  # Load .env file first
+
 from flask import Flask
 from models import db
 from config import Config

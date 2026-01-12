@@ -13,13 +13,16 @@ import csv
 from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta, date
 import time as pytime
+from models import db, FactTrip
+from sqlalchemy.exc import IntegrityError
 
 trip_bp = Blueprint('trip_bp', __name__)
 
 # Configuration
+import os
 MAX_EXECUTION_SECONDS = 140
 GPSGATE_BASE = "https://omantracking2.com"
-BACKEND_HOST = "https://powerbixgpsgatexgdriver.onrender.com"
+BACKEND_HOST = os.getenv("BACKEND_HOST", "http://localhost:5000")  # Local dev default
 TRIP_REPORT_NAME = "Trip and Idle (Tag)-BI Format"
 WEEK_START_DATE = date(2025, 1, 1)
 
@@ -89,18 +92,26 @@ def fetch_from_gpsgate_api(base_url, token, path):
     }
     
     try:
+        print(f"    📡 Calling {BACKEND_HOST}/api...")
         response = requests.post(
             f"{BACKEND_HOST}/api",
             data=form_body,
-            timeout=20
+            timeout=10
         )
         
         if response.status_code != 200:
             print(f"❌ API error ({response.status_code}): {response.text[:100]}")
             return None
         
+        print(f"    ✅ API response received")
         return response.json()
     
+    except requests.exceptions.Timeout:
+        print(f"❌ API Timeout: Request took too long (>10s)")
+        return None
+    except requests.exceptions.ConnectionError:
+        print(f"❌ API Connection Error: Cannot reach {BACKEND_HOST}/api")
+        return None
     except Exception as e:
         print(f"❌ Exception fetching from GpsGate API: {str(e)}")
         return None
@@ -183,21 +194,131 @@ def request_result(app_id, token, base_url, report_id, render_id):
     }
     
     try:
+        print(f"      📡 Calling {BACKEND_HOST}/result...")
         response = requests.post(
             f"{BACKEND_HOST}/result",
             data=payload,
-            timeout=40
+            timeout=120
         )
         
         if response.status_code != 200:
             print(f"  ⚠️  Result error ({response.status_code}): {response.text[:100]}")
             return None
         
+        print(f"      ✅ Result response received")
         return response.json()
     
+    except requests.exceptions.Timeout:
+        print(f"❌ Result Timeout: Request took too long (>120s)")
+        return None
     except Exception as e:
         print(f"  ⚠️  Exception in result: {str(e)}")
         return None
+
+
+# ============================================================================
+# HELPER: Download CSV from GDrive or GpsGate (mirrors fnCSVTrip)
+# ============================================================================
+
+def store_trip_data_to_db(df, app_id, tag_id):
+    """
+    Store trip data to PostgreSQL with incremental logic
+    Uses UPSERT pattern: Insert new records, skip duplicates
+    
+    Args:
+        df: DataFrame with trip data
+        app_id: Application ID
+        tag_id: Tag ID
+    
+    Returns:
+        dict: {'inserted': count, 'skipped': count, 'errors': count}
+    """
+    if df is None or len(df) == 0:
+        return {'inserted': 0, 'skipped': 0, 'errors': 0}
+    
+    stats = {'inserted': 0, 'skipped': 0, 'errors': 0}
+    
+    try:
+        for idx, row in df.iterrows():
+            try:
+                # Parse Start Time to extract date and time
+                start_datetime = row.get('Start Time')
+                if pd.isna(start_datetime):
+                    stats['errors'] += 1
+                    continue
+                
+                # Ensure it's a datetime object
+                if isinstance(start_datetime, str):
+                    start_datetime = pd.to_datetime(start_datetime, errors='coerce')
+                
+                if pd.isna(start_datetime):
+                    stats['errors'] += 1
+                    continue
+                
+                event_date = start_datetime.date()
+                start_time = start_datetime.time()
+                
+                # Extract vehicle name
+                vehicle = str(row.get('Vehicle', '')).strip()
+                if not vehicle:
+                    stats['errors'] += 1
+                    continue
+                
+                # Extract other fields
+                duration = str(row.get('Duration', ''))
+                distance_gps = row.get('Distance (GPS)')
+                max_speed = row.get('Max Speed')
+                avg_speed = row.get('Avg Speed')
+                trip_idle_flag = str(row.get('Trip/Idle*', ''))
+                
+                # Convert numeric fields
+                try:
+                    distance_gps = float(distance_gps) if pd.notna(distance_gps) else None
+                    max_speed = float(max_speed) if pd.notna(max_speed) else None
+                    avg_speed = float(avg_speed) if pd.notna(avg_speed) else None
+                except (ValueError, TypeError):
+                    distance_gps = None
+                    max_speed = None
+                    avg_speed = None
+                
+                # Create the record
+                trip_record = FactTrip(
+                    app_id=app_id,
+                    tag_id=tag_id,
+                    event_date=event_date,
+                    start_time=start_time,
+                    duration=duration,
+                    vehicle=vehicle,
+                    distance_gps=distance_gps,
+                    max_speed=max_speed,
+                    avg_speed=avg_speed,
+                    event_state=trip_idle_flag,
+                    created_at=datetime.utcnow()
+                )
+                
+                # Try to insert
+                db.session.add(trip_record)
+                db.session.flush()  # Flush to detect constraint violations
+                stats['inserted'] += 1
+                
+            except IntegrityError as integrity_err:
+                # Duplicate record - rollback and skip
+                db.session.rollback()
+                stats['skipped'] += 1
+            except Exception as row_err:
+                # Other errors
+                db.session.rollback()
+                print(f"    ⚠️  Error inserting row {idx}: {str(row_err)}")
+                stats['errors'] += 1
+        
+        # Commit all successful inserts
+        db.session.commit()
+        
+    except Exception as db_err:
+        print(f"  ❌ Database error: {str(db_err)}")
+        db.session.rollback()
+    
+    return stats
 
 
 # ============================================================================
@@ -334,14 +455,14 @@ def clean_csv_data(csv_content):
 @trip_bp.route('/trip-data', methods=['POST'])
 def get_trip_data():
     """
-    Trip Data Endpoint
+    Trip Data Endpoint - with PostgreSQL incremental storage
     
     Flow mirrors Power BI M queries:
     1. Fetch Reports
     2. Find "Trip and Idle (Tag)-BI Format" report
     3. Generate WeeklySchedule
-    4. For each week: Render → Result → Download → Clean
-    5. Combine all weeks into single table
+    4. For each week: Render → Result → Download → Clean → Store to DB
+    5. Combine all weeks into single table + store to PostgreSQL with incremental logic
     
     Required Parameters:
     - app_id: Application ID
@@ -349,220 +470,241 @@ def get_trip_data():
     - base_url: GpsGate base URL
     - tag_id: Tag ID
     
-    Note: NO event_id required for Trip endpoint
-    
     Returns:
         JSON: {
             'trip_events': [list of trip records],
             'total_rows': int,
             'weeks_processed': int,
+            'db_inserted': int,
+            'db_skipped': int,
             'execution_time_seconds': float
         }
     """
-    try:
-        start_time = pytime.time()
-        data = request.form or request.get_json() or {}
-        
-        # Extract parameters
-        app_id = data.get('app_id')
-        token = data.get('token')
-        base_url = data.get('base_url')
-        tag_id = data.get('tag_id')
-        
-        # Validate required parameters (NO event_id)
-        if not all([app_id, token, base_url, tag_id]):
-            return jsonify({
-                "error": "Missing required parameters",
-                "required": ["app_id", "token", "base_url", "tag_id"]
-            }), 400
-        
-        print(f"\n{'='*70}")
-        print(f"🚗 TRIP DATA PIPELINE START")
-        print(f"{'='*70}")
-        print(f"App ID: {app_id}")
-        print(f"Tag ID: {tag_id}")
-        print(f"Base URL: {base_url}")
-        
-        # =====================================================================
-        # STEP 1: Fetch Reports (mirrors Reports M query)
-        # =====================================================================
-        print(f"\n📋 Step 1: Fetching reports...")
-        reports_path = f"comGpsGate/api/v.1/applications/{app_id}/reports"
-        reports_response = fetch_from_gpsgate_api(base_url, token, reports_path)
-        
-        if not reports_response or 'data' not in reports_response:
-            return jsonify({"error": "Failed to fetch reports"}), 500
-        
-        reports_list = reports_response.get('data', [])
-        print(f"  ✅ Found {len(reports_list)} reports")
-        
-        # =====================================================================
-        # STEP 2: Find Trip Report (mirrors TripReport M query)
-        # =====================================================================
-        print(f"\n🔍 Step 2: Finding Trip Report '{TRIP_REPORT_NAME}'...")
-        trip_report = next(
-            (r for r in reports_list if r.get('name') == TRIP_REPORT_NAME),
-            None
-        )
-        
-        if not trip_report:
-            available = [r.get('name') for r in reports_list]
-            print(f"  ❌ Report not found. Available reports:")
-            for name in available:
-                print(f"     - {name}")
-            return jsonify({
-                "error": f"Report '{TRIP_REPORT_NAME}' not found",
-                "available_reports": available
-            }), 404
-        
-        report_id = trip_report.get('id')
-        print(f"  ✅ Trip Report ID: {report_id}")
-        
-        # =====================================================================
-        # STEP 3: Generate Weekly Schedule (mirrors WeeklySchedule M query)
-        # =====================================================================
-        print(f"\n📅 Step 3: Generating weekly schedule...")
-        weeks = build_weekly_schedule()
-        print(f"  ✅ Generated {len(weeks)} weeks (from 2025-01-01 to today)")
-        
-        all_dataframes = []
-        weeks_processed = 0
-        
-        # =====================================================================
-        # STEP 4: Process Each Week (mirrors WeeklyTripRender + WeeklyTripFilePath + Trip)
-        # =====================================================================
-        print(f"\n🔄 Step 4: Processing weeks...")
-        
-        for i, week in enumerate(weeks):
+    from flask import current_app
+    
+    with current_app.app_context():
+        try:
+            start_time = pytime.time()
+            data = request.form or request.get_json() or {}
+            
+            # Extract parameters
+            app_id = data.get('app_id')
+            token = data.get('token')
+            base_url = data.get('base_url')
+            tag_id = data.get('tag_id')
+            
+            # Validate required parameters (NO event_id)
+            if not all([app_id, token, base_url, tag_id]):
+                return jsonify({
+                    "error": "Missing required parameters",
+                    "required": ["app_id", "token", "base_url", "tag_id"]
+                }), 400
+            
+            print(f"\n{'='*70}")
+            print(f"🚗 TRIP DATA PIPELINE START")
+            print(f"{'='*70}")
+            print(f"App ID: {app_id}")
+            print(f"Tag ID: {tag_id}")
+            print(f"Base URL: {base_url}")
+            
+            # =====================================================================
+            # STEP 1: Fetch Reports (mirrors Reports M query)
+            # =====================================================================
+            print(f"\n📋 Step 1: Fetching reports...")
+            reports_path = f"comGpsGate/api/v.1/applications/{app_id}/reports"
+            reports_response = fetch_from_gpsgate_api(base_url, token, reports_path)
+            
+            if not reports_response or 'data' not in reports_response:
+                return jsonify({"error": "Failed to fetch reports"}), 500
+            
+            reports_list = reports_response.get('data', [])
+            print(f"  ✅ Found {len(reports_list)} reports")
+            
+            # =====================================================================
+            # STEP 2: Find Trip Report (mirrors TripReport M query)
+            # =====================================================================
+            print(f"\n🔍 Step 2: Finding Trip Report '{TRIP_REPORT_NAME}'...")
+            trip_report = next(
+                (r for r in reports_list if r.get('name') == TRIP_REPORT_NAME),
+                None
+            )
+            
+            if not trip_report:
+                available = [r.get('name') for r in reports_list]
+                print(f"  ❌ Report not found. Available reports:")
+                for name in available:
+                    print(f"     - {name}")
+                return jsonify({
+                    "error": f"Report '{TRIP_REPORT_NAME}' not found",
+                    "available_reports": available
+                }), 404
+            
+            report_id = trip_report.get('id')
+            print(f"  ✅ Trip Report ID: {report_id}")
+            
+            # =====================================================================
+            # STEP 3: Generate Weekly Schedule (mirrors WeeklySchedule M query)
+            # =====================================================================
+            print(f"\n📅 Step 3: Generating weekly schedule...")
+            weeks = build_weekly_schedule()
+            weeks = weeks[:10]  # TESTING: Limit to 10 weeks only
+            print(f"  ✅ Generated {len(weeks)} weeks (from 2025-01-01 to today)")
+            
+            all_dataframes = []
+            weeks_processed = 0
+            total_db_inserted = 0
+            total_db_skipped = 0
+            
+            # =====================================================================
+            # STEP 4: Process Each Week
+            # =====================================================================
+            print(f"\n🔄 Step 4: Processing weeks...")
+            
+            for i, week in enumerate(weeks):
+                elapsed = pytime.time() - start_time
+                
+                # Timeout check
+                if elapsed > MAX_EXECUTION_SECONDS:
+                    print(f"\n⏹  Stopping after {elapsed:.1f}s to avoid Power BI timeout")
+                    break
+                
+                week_num = i + 1
+                print(f"\n  Week {week_num}/{len(weeks)}: {week['start_date']} → {week['end_date']}")
+                
+                try:
+                    # 4a: Request Render
+                    print(f"    📊 Requesting render...")
+                    render_result = request_render(
+                        app_id=app_id,
+                        token=token,
+                        base_url=base_url,
+                        tag_id=tag_id,
+                        report_id=report_id,
+                        period_start=week['WeekStart'],
+                        period_end=week['WeekEnd']
+                    )
+                    
+                    if not render_result or 'render_id' not in render_result:
+                        print(f"    ⚠️  Render failed")
+                        continue
+                    
+                    render_id = render_result['render_id']
+                    print(f"    ✅ Render ID: {render_id}")
+                    
+                    # 4b: Request Result
+                    print(f"    🔗 Requesting result...")
+                    result_result = request_result(
+                        app_id=app_id,
+                        token=token,
+                        base_url=base_url,
+                        report_id=report_id,
+                        render_id=render_id
+                    )
+                    
+                    if not result_result or 'gdrive_link' not in result_result:
+                        print(f"    ⚠️  Result not ready yet")
+                        continue
+                    
+                    gdrive_link = result_result['gdrive_link']
+                    print(f"    ✅ Download link ready")
+                    
+                    # 4c: Download CSV
+                    print(f"    📥 Downloading CSV...")
+                    csv_content = download_csv_from_path(gdrive_link, token)
+                    
+                    if not csv_content:
+                        print(f"    ⚠️  Download failed")
+                        continue
+                    
+                    print(f"    ✅ Downloaded ({len(csv_content)} bytes)")
+                    
+                    # 4d: Clean CSV
+                    print(f"    🧹 Cleaning CSV...")
+                    df = clean_csv_data(csv_content)
+                    
+                    if df is None or len(df) == 0:
+                        print(f"    ⚠️  No data after cleaning")
+                        continue
+                    
+                    # 4e: Store to Database (Incremental Logic)
+                    print(f"    💾 Storing to PostgreSQL (incremental)...")
+                    db_stats = store_trip_data_to_db(df, app_id, tag_id)
+                    print(f"    ✅ Inserted: {db_stats['inserted']}, Skipped: {db_stats['skipped']}, Errors: {db_stats['errors']}")
+                    
+                    total_db_inserted += db_stats['inserted']
+                    total_db_skipped += db_stats['skipped']
+                    
+                    all_dataframes.append(df)
+                    weeks_processed += 1
+                    print(f"    ✅ Processed {len(df)} trips")
+                
+                except Exception as week_error:
+                    print(f"    ❌ Error: {str(week_error)}")
+                    import traceback
+                    traceback.print_exc()
+                    continue
+            
+            # =====================================================================
+            # STEP 5: Combine Results
+            # =====================================================================
+            print(f"\n📦 Step 5: Combining results...")
+            
+            if not all_dataframes:
+                print(f"  ⚠️  No trip data found")
+                return jsonify({
+                    "message": "No trip data found",
+                    "trip_events": [],
+                    "total_rows": 0,
+                    "weeks_processed": 0,
+                    "db_inserted": total_db_inserted,
+                    "db_skipped": total_db_skipped
+                }), 200
+            
+            combined_df = pd.concat(all_dataframes, ignore_index=True)
+            combined_df = combined_df.replace({np.nan: None, pd.NaT: None})
+            
+            print(f"  ✅ Combined {len(combined_df)} total trips")
+            
+            # Convert to list of dicts
+            trip_events = combined_df.to_dict('records')
+            
+            # Cleanup
+            del combined_df
+            del all_dataframes
+            
             elapsed = pytime.time() - start_time
             
-            # Timeout check
-            if elapsed > MAX_EXECUTION_SECONDS:
-                print(f"\n⏹  Stopping after {elapsed:.1f}s to avoid Power BI timeout")
-                break
+            # =====================================================================
+            # Final Response
+            # =====================================================================
+            print(f"\n{'='*70}")
+            print(f"✅ TRIP DATA PIPELINE COMPLETE")
+            print(f"{'='*70}")
+            print(f"📊 Total trips: {len(trip_events)}")
+            print(f"📅 Weeks processed: {weeks_processed}/{len(weeks)}")
+            print(f"💾 DB Inserted: {total_db_inserted}, Skipped: {total_db_skipped}")
+            print(f"⏱️  Execution time: {elapsed:.1f}s")
+            print(f"{'='*70}\n")
             
-            week_num = i + 1
-            print(f"\n  Week {week_num}/{len(weeks)}: {week['start_date']} → {week['end_date']}")
-            
-            try:
-                # 4a: Request Render (mirrors fnRequestRender)
-                print(f"    📊 Requesting render...")
-                render_result = request_render(
-                    app_id=app_id,
-                    token=token,
-                    base_url=base_url,
-                    tag_id=tag_id,
-                    report_id=report_id,
-                    period_start=week['WeekStart'],
-                    period_end=week['WeekEnd']
-                )
-                
-                if not render_result or 'render_id' not in render_result:
-                    print(f"    ⚠️  Render failed")
-                    continue
-                
-                render_id = render_result['render_id']
-                print(f"    ✅ Render ID: {render_id}")
-                
-                # 4b: Request Result (mirrors fnRequestResult)
-                print(f"    🔗 Requesting result...")
-                result_result = request_result(
-                    app_id=app_id,
-                    token=token,
-                    base_url=base_url,
-                    report_id=report_id,
-                    render_id=render_id
-                )
-                
-                if not result_result or 'gdrive_link' not in result_result:
-                    print(f"    ⚠️  Result not ready yet")
-                    continue
-                
-                gdrive_link = result_result['gdrive_link']
-                print(f"    ✅ Download link ready")
-                
-                # 4c: Download CSV (mirrors fnCSVTrip)
-                print(f"    📥 Downloading CSV...")
-                csv_content = download_csv_from_path(gdrive_link, token)
-                
-                if not csv_content:
-                    print(f"    ⚠️  Download failed")
-                    continue
-                
-                print(f"    ✅ Downloaded ({len(csv_content)} bytes)")
-                
-                # 4d: Clean CSV (mirrors fnCSVTrip cleaning)
-                print(f"    🧹 Cleaning CSV...")
-                df = clean_csv_data(csv_content)
-                
-                if df is None or len(df) == 0:
-                    print(f"    ⚠️  No data after cleaning")
-                    continue
-                
-                all_dataframes.append(df)
-                weeks_processed += 1
-                print(f"    ✅ Processed {len(df)} trips")
-            
-            except Exception as week_error:
-                print(f"    ❌ Error: {str(week_error)}")
-                continue
-        
-        # =====================================================================
-        # STEP 5: Combine Results (mirrors Table.Combine in Trip M query)
-        # =====================================================================
-        print(f"\n📦 Step 5: Combining results...")
-        
-        if not all_dataframes:
-            print(f"  ⚠️  No trip data found")
             return jsonify({
-                "message": "No trip data found",
-                "trip_events": [],
-                "total_rows": 0,
-                "weeks_processed": 0
+                "message": "Success",
+                "trip_events": trip_events,
+                "total_rows": len(trip_events),
+                "weeks_processed": weeks_processed,
+                "db_inserted": total_db_inserted,
+                "db_skipped": total_db_skipped,
+                "execution_time_seconds": round(elapsed, 2)
             }), 200
         
-        combined_df = pd.concat(all_dataframes, ignore_index=True)
-        combined_df = combined_df.replace({np.nan: None, pd.NaT: None})
-        
-        print(f"  ✅ Combined {len(combined_df)} total trips")
-        
-        # Convert to list of dicts
-        trip_events = combined_df.to_dict('records')
-        
-        # Cleanup
-        del combined_df
-        del all_dataframes
-        
-        elapsed = pytime.time() - start_time
-        
-        # =====================================================================
-        # Final Response
-        # =====================================================================
-        print(f"\n{'='*70}")
-        print(f"✅ TRIP DATA PIPELINE COMPLETE")
-        print(f"{'='*70}")
-        print(f"📊 Total trips: {len(trip_events)}")
-        print(f"📅 Weeks processed: {weeks_processed}/{len(weeks)}")
-        print(f"⏱️  Execution time: {elapsed:.1f}s")
-        print(f"{'='*70}\n")
-        
-        return jsonify({
-            "message": "Success",
-            "trip_events": trip_events,
-            "total_rows": len(trip_events),
-            "weeks_processed": weeks_processed,
-            "execution_time_seconds": round(elapsed, 2)
-        }), 200
-    
-    except Exception as e:
-        elapsed = pytime.time() - start_time
-        print(f"\n❌ CRITICAL ERROR: {str(e)}")
-        import traceback
-        print(traceback.format_exc())
-        
-        return jsonify({
-            "error": str(e),
-            "trip_events": [],
-            "total_rows": 0,
-            "execution_time_seconds": round(elapsed, 2)
-        }), 500
+        except Exception as e:
+            elapsed = pytime.time() - start_time
+            print(f"\n❌ CRITICAL ERROR: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+            
+            return jsonify({
+                "error": str(e),
+                "trip_events": [],
+                "total_rows": 0,
+                "execution_time_seconds": round(elapsed, 2)
+            }), 500

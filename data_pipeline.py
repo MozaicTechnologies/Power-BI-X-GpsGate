@@ -6,13 +6,17 @@ Handles: reports, event rules, weekly rendering, CSV download & cleaning
 from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta, time
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import pandas as pd
 import io
 from urllib.parse import urljoin
 from models import db
+from db_storage import store_event_data_to_db
 import json
 import numpy as np
 import time as pytime
+import os
 
 # Custom JSON encoder to handle pandas/numpy types
 class PandasJSONEncoder(json.JSONEncoder):
@@ -32,12 +36,46 @@ class PandasJSONEncoder(json.JSONEncoder):
 pipeline_bp = Blueprint('pipeline_bp', __name__)
 
 MAX_EXECUTION_SECONDS = 140
-MAX_WEEKS_TRIP_WH = 2
-MAX_WEEKS_OTHER = 20
 
-RENDER_URL = "https://powerbixgpsgatexgdriver.onrender.com/render"
-RESULT_URL = "https://powerbixgpsgatexgdriver.onrender.com/result"
-API_PROXY_URL = "https://powerbixgpsgatexgdriver.onrender.com/api"
+# Calculate max weeks from 2025-01-01 to today
+def get_max_weeks():
+    """Calculate number of weeks from 2025-01-01 to today"""
+    start = datetime(2025, 1, 1).date()
+    today = datetime.utcnow().date()
+    weeks = (today - start).days // 7 + 1
+    return max(1, weeks)
+
+MAX_WEEKS_TRIP_WH = 1  # Trip & WH: 1 week per call (incremental weekly pulls)
+MAX_WEEKS_OTHER = 1    # Other events: 1 week per call (incremental weekly pulls)
+
+# Centralized Base URL for Microservices (local development default)
+BASE_SERVICE_URL = os.getenv("BACKEND_HOST", "http://localhost:5000")
+RENDER_URL = f"{BASE_SERVICE_URL}/render"
+RESULT_URL = f"{BASE_SERVICE_URL}/result"
+API_PROXY_URL = f"{BASE_SERVICE_URL}/api"
+
+# ============================================================================
+# RESILIENT SESSION WITH RETRY LOGIC
+# ============================================================================
+
+def create_resilient_session():
+    """Create requests session with automatic retries + backoff"""
+    session = requests.Session()
+    
+    retry_strategy = Retry(
+        total=3,                                    # Max 3 retries
+        backoff_factor=2,                          # Wait 2s, 4s, 8s between retries
+        status_forcelist=[429, 500, 502, 503, 504] # Retry on these HTTP codes
+    )
+    
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    
+    return session
+
+# Global session instance
+RESILIENT_SESSION = create_resilient_session()
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -52,9 +90,21 @@ def fetch_from_gpsgate_api(base_url, token, path):
     }
 
     try:
-        resp = requests.post(API_PROXY_URL, data=form_body, timeout=30)
+        # Use resilient session with timeout (connect=10s, read=60s)
+        resp = RESILIENT_SESSION.post(
+            API_PROXY_URL, 
+            data=form_body, 
+            timeout=(10, 60)
+        )
         resp.raise_for_status()
+        
+        # Rate limit: small delay between requests
+        pytime.sleep(0.3)
+        
         return resp.json()
+    except requests.exceptions.Timeout:
+        print(f"Timeout fetching from GpsGate API after 3 retries")
+        return None
     except Exception as e:
         print(f"Error fetching from GpsGate API: {e}")
         return None
@@ -66,9 +116,21 @@ def download_csv_from_gdrive(gdrive_link, auth_token=None):
         if "omantracking2.com" in gdrive_link:
             headers["Authorization"] = auth_token
 
-        resp = requests.get(gdrive_link, headers=headers, timeout=60)
+        # Use resilient session with longer timeout for CSV download
+        resp = RESILIENT_SESSION.get(
+            gdrive_link, 
+            headers=headers, 
+            timeout=(10, 120)  # 120s read timeout for large files
+        )
         resp.raise_for_status()
+        
+        # Rate limit
+        pytime.sleep(0.3)
+        
         return resp.content
+    except requests.exceptions.Timeout:
+        print(f"Timeout downloading CSV after 3 retries")
+        return None
     except Exception as e:
         print(f"Error downloading CSV: {e}")
         return None
@@ -121,6 +183,14 @@ def process_event_data(event_name, response_key):
         # JSON first, then form
         data = request.get_json(silent=True) or request.form or {}
 
+        # Print request body for Trip event
+        if event_name == "Trip":
+            print(f"\n{'='*70}")
+            print(f"[TRIP] PROCESS_EVENT_DATA - TRIP REQUEST BODY")
+            print(f"{'='*70}")
+            print(f"Data: {json.dumps(data, indent=2)}")
+            print(f"{'='*70}\n")
+
         app_id = data.get("app_id")
         token = data.get("token")
         base_url = data.get("base_url")
@@ -130,23 +200,47 @@ def process_event_data(event_name, response_key):
 
         is_trip = (event_name == "Trip")
 
+        # Print validation info for Trip
+        if event_name == "Trip":
+            print(f"[OK] app_id: {app_id}")
+            print(f"[OK] token: {'***' if token else 'MISSING'}")
+            print(f"[OK] base_url: {base_url}")
+            print(f"[OK] report_id: {report_id}")
+            print(f"[OK] tag_id: {tag_id}\n")
+
         # ---------------- VALIDATION ----------------
         if is_trip:
             if not all([app_id, token, base_url, report_id, tag_id]):
+                print(f"[ERROR] VALIDATION FAILED for Trip")
                 return jsonify({"error": "Missing required parameters for Trip"}), 400
         else:
             if not all([app_id, token, base_url, report_id, tag_id, event_id]):
+                print(f"[ERROR] VALIDATION FAILED for {event_name}")
                 return jsonify({"error": "Missing required parameters"}), 400
 
         max_weeks = MAX_WEEKS_TRIP_WH if event_name in ["Trip", "WH"] else MAX_WEEKS_OTHER
         weeks = build_weekly_schedule()[:max_weeks]
 
+        if event_name == "Trip":
+            print(f"[OK] MAX_WEEKS: {max_weeks}")
+            print(f"[OK] Total weeks available: {len(build_weekly_schedule())}")
+            print(f"[OK] Processing {len(weeks)} weeks\n")
+
         all_dataframes = []
 
         # ---------------- WEEK LOOP ----------------
-        for week in weeks:
+        weeks_processed = 0
+        total_db_stats = {"inserted": 0, "skipped": 0, "failed": 0}
+        total_internal_dupes = 0  # Track internal duplicates (CSV level)
+        total_rows_raw = 0  # Track raw rows before dedup
+        
+        for i, week in enumerate(weeks):
             if pytime.time() - start_time > MAX_EXECUTION_SECONDS:
+                print(f"[TIMEOUT] Exceeded {MAX_EXECUTION_SECONDS}s")
                 break
+
+            if event_name == "Trip":
+                print(f"  Week {i+1}/{len(weeks)}: {week['start_date']} -> {week['end_date']}")
 
             try:
                 render_payload = {
@@ -163,12 +257,24 @@ def process_event_data(event_name, response_key):
                 if not is_trip:
                     render_payload["event_id"] = event_id
 
-                render_resp = requests.post(RENDER_URL, data=render_payload, timeout=20)
+                # Use resilient session with timeout
+                render_resp = RESILIENT_SESSION.post(
+                    RENDER_URL, 
+                    data=render_payload, 
+                    timeout=(10, 30)
+                )
+                if event_name == "Trip":
+                    import sys; print(f"[DEBUG] Trip Week {i+1}: render_resp.status_code={render_resp.status_code}", file=sys.stderr)
+                
                 if render_resp.status_code != 200:
+                    if event_name == "Trip":
+                        import sys; print(f"[DEBUG] Trip Week {i+1}: Render failed, skipping", file=sys.stderr)
                     continue
 
                 render_id = render_resp.json().get("render_id")
                 if not render_id:
+                    if event_name == "Trip":
+                        import sys; print(f"[DEBUG] Trip Week {i+1}: No render_id, skipping", file=sys.stderr)
                     continue
 
                 result_payload = {
@@ -179,31 +285,108 @@ def process_event_data(event_name, response_key):
                     "report_id": report_id
                 }
 
-                result_resp = requests.post(RESULT_URL, data=result_payload, timeout=40)
+                # Use resilient session for result (can take longer for CSV download)
+                result_resp = RESILIENT_SESSION.post(
+                    RESULT_URL, 
+                    data=result_payload, 
+                    timeout=(10, 120)
+                )
+                if event_name == "Trip":
+                    import sys; print(f"[DEBUG] Trip Week {i+1}: result_resp.status_code={result_resp.status_code}", file=sys.stderr)
+                
                 if result_resp.status_code != 200:
+                    if event_name == "Trip":
+                        import sys; print(f"[DEBUG] Trip Week {i+1}: Result failed, skipping", file=sys.stderr)
                     continue
 
                 gdrive_link = result_resp.json().get("gdrive_link")
                 if not gdrive_link:
+                    if event_name == "Trip":
+                        import sys; print(f"[DEBUG] Trip Week {i+1}: No gdrive_link, skipping", file=sys.stderr)
                     continue
 
                 csv_content = download_csv_from_gdrive(gdrive_link, token)
                 if not csv_content:
+                    import sys; print(f"[{event_name}] Week {i+1}: No CSV content", file=sys.stderr)
+                    if event_name == "Trip":
+                        print(f"[DEBUG] Trip Week {i+1}: No CSV content from gdrive", file=sys.stderr)
                     continue
 
                 df = clean_csv_data(csv_content)
                 if df is not None and not df.empty:
+                    df_original = len(df)
+                    total_rows_raw += df_original
+                    import sys; print(f"[SPEEDING] Week {i+1}: {df_original} rows fetched (raw)", file=sys.stderr)
+                    
+                    # DEDUPLICATE based on ALL columns (complete row duplicate)
+                    # This removes rows where every column value is identical
+                    df = df.drop_duplicates(keep='first')
+                    df_after_dedup = len(df)
+                    internal_dupes = df_original - df_after_dedup
+                    total_internal_dupes += internal_dupes
+                    if internal_dupes > 0:
+                        print(f"[SPEEDING] Week {i+1}: {df_original} -> {df_after_dedup} after removing {internal_dupes} complete row duplicates (all columns identical)", file=sys.stderr)
+                    else:
+                        print(f"[SPEEDING] Week {i+1}: {df_after_dedup} rows (clean, no duplicates)", file=sys.stderr)
+                    
                     all_dataframes.append(df)
+                    
+                    # ✓ Store data to database with incremental logic
+                    db_stats = store_event_data_to_db(df, app_id, tag_id, event_name)
+                    import sys; print(f"[SPEEDING] Week {i+1}: DB insert stats - Inserted: {db_stats.get('inserted')}, DB-level duplicates: {db_stats.get('skipped')}, Errors: {db_stats.get('failed')}", file=sys.stderr)
+                    total_db_stats["inserted"] += db_stats.get("inserted", 0)
+                    total_db_stats["skipped"] += db_stats.get("skipped", 0)
+                    total_db_stats["failed"] += db_stats.get("failed", 0)
+                    
+                    # Week successfully processed
+                    weeks_processed += 1
 
             except Exception as e:
-                print(f"Week processing error: {e}")
+                # Log exception for Trip
+                if event_name == "Trip":
+                    import sys; import traceback
+                    print(f"[DEBUG ERROR] Trip Week {i+1}: Exception: {type(e).__name__}: {str(e)[:200]}", file=sys.stderr)
+                    print(f"[DEBUG] Traceback: {traceback.format_exc()[:500]}", file=sys.stderr)
+                # Silently skip week errors - data already may have been partially processed
                 continue
+
+        # ============================================================================
+        # COMPLETE ROW ACCOUNTING REPORT
+        # ============================================================================
+        rows_after_dedup = sum(len(df) for df in all_dataframes)
+        db_inserted = total_db_stats.get("inserted", 0)
+        db_duplicates = total_db_stats.get("skipped", 0)
+        db_failed = total_db_stats.get("failed", 0)
+        
+        import sys
+        print(f"\n{'='*80}", file=sys.stderr)
+        print(f"COMPLETE ROW ACCOUNTING - {event_name}", file=sys.stderr)
+        print(f"{'='*80}", file=sys.stderr)
+        print(f"Total Raw Rows Fetched from API:          {total_rows_raw:>10,}", file=sys.stderr)
+        print(f"  - Internal Duplicates Removed (CSV):   -{total_internal_dupes:>10,}", file=sys.stderr)
+        print(f"  = Rows After Deduplication:             {rows_after_dedup:>10,}", file=sys.stderr)
+        print(f"  - Database-Level Duplicates (flagged):  -{db_duplicates:>10,}", file=sys.stderr)
+        print(f"  - Failed DB Inserts:                    -{db_failed:>10,}", file=sys.stderr)
+        print(f"  = Total Inserted to DB:                 {db_inserted:>10,}", file=sys.stderr)
+        print(f"{'='*80}", file=sys.stderr)
+        print(f"Weeks Processed: {weeks_processed} | Time: {pytime.time() - start_time:.1f}s", file=sys.stderr)
+        print(f"{'='*80}\n", file=sys.stderr)
 
         if not all_dataframes:
             return jsonify({
                 "message": "No data found",
                 response_key: [],
-                "total_rows": 0
+                "total_rows": 0,
+                "weeks_processed": weeks_processed,
+                "db_stats": total_db_stats,
+                "accounting": {
+                    "raw_fetched": total_rows_raw,
+                    "internal_dupes_removed": total_internal_dupes,
+                    "rows_after_dedup": rows_after_dedup,
+                    "db_duplicates_flagged": db_duplicates,
+                    "db_failed": db_failed,
+                    "total_inserted": db_inserted
+                }
             }), 200
 
         combined_df = pd.concat(all_dataframes, ignore_index=True)
@@ -212,7 +395,17 @@ def process_event_data(event_name, response_key):
         return jsonify({
             "message": "Success",
             response_key: events,
-            "total_rows": len(events)
+            "total_rows": len(events),
+            "weeks_processed": weeks_processed,
+            "db_stats": total_db_stats,
+            "accounting": {
+                "raw_fetched": total_rows_raw,
+                "internal_dupes_removed": total_internal_dupes,
+                "rows_after_dedup": rows_after_dedup,
+                "db_duplicates_flagged": db_duplicates,
+                "db_failed": db_failed,
+                "total_inserted": db_inserted
+            }
         }), 200
 
     except Exception as e:
@@ -302,6 +495,14 @@ def idle():
 
 @pipeline_bp.route("/trip-data", methods=["POST"])
 def trip():
+    # Print request body for debugging
+    request_body = request.get_json(silent=True) or request.form or {}
+    print(f"\n{'='*70}")
+    print(f"[TRIP-DATA] TRIP-DATA ENDPOINT REQUEST")
+    print(f"{'='*70}")
+    print(f"Request Body: {json.dumps(request_body, indent=2)}")
+    print(f"{'='*70}\n")
+    
     return process_event_data("Trip", "trip_events")
 
 @pipeline_bp.route("/awh-data", methods=["POST"])
