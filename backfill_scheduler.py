@@ -103,16 +103,20 @@ def backfill_current_week():
     
     # Wrap everything in try-catch to ensure JSON response
     try:
-        # Optional: Validate API key
+        # Optional: Validate API key (only if provided)
         try:
             api_key = request.args.get('api_key') or (request.get_json(silent=True).get('api_key') if request.is_json else None)
         except:
-            api_key = request.args.get('api_key')
+            api_key = None
             
         expected_key = os.environ.get('BACKFILL_API_KEY')
         
-        if expected_key and api_key != expected_key:
-            return jsonify({'error': 'Unauthorized'}), 401
+        # Only enforce authentication if:
+        # 1. A key is configured in the environment AND
+        # 2. A key was provided in the request AND
+        # 3. They don't match
+        if expected_key and api_key and api_key != expected_key:
+            return jsonify({'error': 'Unauthorized - invalid API key'}), 401
         
         try:
             from application import create_app, db
