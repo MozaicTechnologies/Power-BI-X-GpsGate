@@ -70,6 +70,31 @@ def dashboard():
                 gap: 10px;
             }
             
+            .status-badge {
+                display: inline-block;
+                padding: 5px 12px;
+                border-radius: 20px;
+                font-size: 12px;
+                font-weight: 600;
+                margin-left: 10px;
+            }
+            
+            .status-badge.running {
+                background: #48bb78;
+                color: white;
+                animation: pulse 2s infinite;
+            }
+            
+            .status-badge.idle {
+                background: #cbd5e0;
+                color: #333;
+            }
+            
+            @keyframes pulse {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.7; }
+            }
+            
             .header p {
                 color: #666;
                 font-size: 14px;
@@ -79,6 +104,7 @@ def dashboard():
                 display: flex;
                 gap: 10px;
                 margin-top: 15px;
+                flex-wrap: wrap;
             }
             
             button {
@@ -295,12 +321,16 @@ def dashboard():
         <div class="container">
             <!-- Header -->
             <div class="header">
-                <h1>🚀 GPS Gate Backfill Dashboard</h1>
+                <h1>
+                    🚀 GPS Gate Backfill Dashboard
+                    <span class="status-badge idle" id="statusBadge">Idle</span>
+                </h1>
                 <p>Manage and monitor data synchronization</p>
                 <div class="btn-group">
-                    <button class="btn-primary" onclick="startBackfill(54)">Start Backfill (54 weeks)</button>
-                    <button class="btn-secondary" onclick="startBackfill(1)">Manual Sync (1 week)</button>
-                    <button class="btn-success" onclick="checkStatus()">Check Status</button>
+                    <button class="btn-success" onclick="runMigration()" id="migrateBtn">🔧 Fix Database Schema</button>
+                    <button class="btn-primary" onclick="startBackfill(54)">▶ Start Backfill (54 weeks)</button>
+                    <button class="btn-secondary" onclick="startBackfill(1)">🔄 Manual Sync (1 week)</button>
+                    <button class="btn-success" onclick="checkStatus()">📈 Check Status</button>
                 </div>
             </div>
             
@@ -459,6 +489,72 @@ def dashboard():
                 .catch(e => alert('Error: ' + e));
             }
             
+            function runMigration() {
+                document.getElementById('migrateBtn').disabled = true;
+                document.getElementById('migrateBtn').textContent = '⏳ Running migration...';
+                
+                fetch('/api/dashboard/migrate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                })
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('migrateBtn').disabled = false;
+                    document.getElementById('migrateBtn').textContent = '🔧 Fix Database Schema';
+                    
+                    if (data.status === 'success') {
+                        alert('✅ Database migration successful!\\n\\nThe is_duplicate column has been added to all tables.\\n\\nYou can now start the backfill.');
+                        updateLogs('✅ Database migration completed successfully');
+                    } else {
+                        alert('❌ Migration failed:\\n\\n' + data.message);
+                        updateLogs('❌ Migration failed: ' + data.message);
+                    }
+                })
+                .catch(e => {
+                    document.getElementById('migrateBtn').disabled = false;
+                    document.getElementById('migrateBtn').textContent = '🔧 Fix Database Schema';
+                    alert('❌ Error: ' + e);
+                    updateLogs('❌ Migration error: ' + e);
+                });
+            }
+            
+            // Auto-refresh stats every 2 seconds
+            setInterval(() => {
+                fetch('/api/dashboard/stats')
+                    .then(r => r.json())
+                    .then(data => {
+                        // Update status badge
+                        const badge = document.getElementById('statusBadge');
+                        if (data.active_operations > 0) {
+                            badge.textContent = '🟢 Syncing...';
+                            badge.className = 'status-badge running';
+                        } else {
+                            badge.textContent = 'Idle';
+                            badge.className = 'status-badge idle';
+                        }
+                        
+                        // Update logs
+                        const logsContainer = document.getElementById('logsContainer');
+                        if (data.recent_logs && data.recent_logs.length > 0) {
+                            logsContainer.innerHTML = data.recent_logs.map(log => {
+                                let levelClass = 'log-info';
+                                if (log.level === 'error') levelClass = 'log-error';
+                                if (log.level === 'warning') levelClass = 'log-warning';
+                                return `<div class="log-entry"><span class="log-timestamp">${log.timestamp}</span> <span class="${levelClass}">➜</span> ${log.message}</div>`;
+                            }).join('');
+                        }
+                    })
+                    .catch(e => console.log('Stats refresh failed'));
+            }, 2000);
+            
+            function updateLogs(message) {
+                const logsContainer = document.getElementById('logsContainer');
+                const timestamp = new Date().toLocaleTimeString();
+                const newLog = `<div class="log-entry"><span class="log-timestamp">${timestamp}</span> <span class="log-info">➜</span> ${message}</div>`;
+                logsContainer.innerHTML += newLog;
+                logsContainer.scrollTop = logsContainer.scrollHeight;
+            }
+            
             // Auto-refresh every 30 seconds
             setInterval(() => {
                 fetch('/api/health')
@@ -475,7 +571,7 @@ def dashboard():
 @dashboard_bp.route('/dashboard/stats', methods=['GET'])
 def dashboard_stats():
     """API endpoint returning dashboard statistics as JSON"""
-    from backfill_scheduler import backfill_operations
+    from api import backfill_operations
     
     # Count active operations
     active_ops = sum(1 for op in backfill_operations.values() if op.get('status') == 'running')
@@ -484,7 +580,7 @@ def dashboard_stats():
         "service_status": "online",
         "total_records": 0,
         "active_operations": active_ops,
-        "recent_logs": recent_logs[-10:],  # Last 10 logs
+        "recent_logs": recent_logs[-20:],  # Last 20 logs for real-time display
         "event_types": {
             "Trip": {"status": "error", "records": 0},
             "Speeding": {"status": "error", "records": 0},
@@ -497,3 +593,33 @@ def dashboard_stats():
         },
         "timestamp": datetime.now().isoformat()
     })
+
+@dashboard_bp.route('/dashboard/migrate', methods=['POST'])
+def run_migration():
+    """Run database migration to add missing columns"""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ['python', 'migrate_add_columns.py'],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode == 0:
+            return jsonify({
+                "status": "success",
+                "message": "Database migration completed successfully",
+                "output": result.stdout
+            }), 200
+        else:
+            return jsonify({
+                "status": "error",
+                "message": "Migration failed",
+                "error": result.stderr
+            }), 500
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
