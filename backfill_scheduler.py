@@ -197,5 +197,6 @@ def backfill_status():
 
 @backfill_api.route('/dashboard', methods=['GET'])
 def dashboard():
-    """Dashboard for monitoring and triggering backfills"""
-    return render_template('backfill_dashboard.html')
+    """Redirect to new dashboard in dashboard.py"""
+    from flask import redirect
+    return redirect('/api/dashboard')
