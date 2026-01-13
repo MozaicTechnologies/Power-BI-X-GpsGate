@@ -676,7 +676,7 @@ def add_operation_log():
 def dashboard_stats():
     """API endpoint returning dashboard statistics as JSON"""
     from api import backfill_operations
-    from models import db, FactTrip, FactSpeeding, FactIdle, FactAwh, FactWh, FactHa, FactHb, FactWu
+    from models import db, FactTrip, FactSpeeding, FactIdle, FactAWH, FactWH, FactHA, FactHB, FactWU
     
     try:
         # Count active operations
@@ -687,11 +687,11 @@ def dashboard_stats():
             trip_count = db.session.query(FactTrip).count()
             speeding_count = db.session.query(FactSpeeding).count()
             idle_count = db.session.query(FactIdle).count()
-            awh_count = db.session.query(FactAwh).count()
-            wh_count = db.session.query(FactWh).count()
-            ha_count = db.session.query(FactHa).count()
-            hb_count = db.session.query(FactHb).count()
-            wu_count = db.session.query(FactWu).count()
+            awh_count = db.session.query(FactAWH).count()
+            wh_count = db.session.query(FactWH).count()
+            ha_count = db.session.query(FactHA).count()
+            hb_count = db.session.query(FactHB).count()
+            wu_count = db.session.query(FactWU).count()
             
             total_records = trip_count + speeding_count + idle_count + awh_count + wh_count + ha_count + hb_count + wu_count
         except Exception as e:
