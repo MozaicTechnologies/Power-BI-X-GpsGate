@@ -13,6 +13,7 @@ import io
 from urllib.parse import urljoin
 from models import db
 from db_storage import store_event_data_to_db
+from gpsgate_api import render_endpoint, result_endpoint, download_csv_from_gdrive
 import json
 import numpy as np
 import time as pytime
@@ -47,12 +48,6 @@ def get_max_weeks():
 
 MAX_WEEKS_TRIP_WH = 1  # Trip & WH: 1 week per call (incremental weekly pulls)
 MAX_WEEKS_OTHER = 1    # Other events: 1 week per call (incremental weekly pulls)
-
-# Centralized Base URL for Microservices (local development default)
-BASE_SERVICE_URL = os.getenv("BACKEND_HOST", "http://localhost:5000")
-RENDER_URL = f"{BASE_SERVICE_URL}/render"
-RESULT_URL = f"{BASE_SERVICE_URL}/result"
-API_PROXY_URL = f"{BASE_SERVICE_URL}/api"
 
 # ============================================================================
 # RESILIENT SESSION WITH RETRY LOGIC
@@ -110,35 +105,9 @@ def fetch_from_gpsgate_api(base_url, token, path):
         return None
 
 
-def download_csv_from_gdrive(gdrive_link, auth_token=None):
-    try:
-        headers = {}
-        if "omantracking2.com" in gdrive_link:
-            headers["Authorization"] = auth_token
-
-        # Use resilient session with longer timeout for CSV download
-        resp = RESILIENT_SESSION.get(
-            gdrive_link, 
-            headers=headers, 
-            timeout=(10, 120)  # 120s read timeout for large files
-        )
-        resp.raise_for_status()
-        
-        # Rate limit
-        pytime.sleep(0.3)
-        
-        return resp.content
-    except requests.exceptions.Timeout:
-        print(f"Timeout downloading CSV after 3 retries")
-        return None
-    except Exception as e:
-        print(f"Error downloading CSV: {e}")
-        return None
-
-
 def clean_csv_data(csv_content):
     try:
-        df = pd.read_csv(io.BytesIO(csv_content), skiprows=8)
+        df = pd.read_csv(io.BytesIO(csv_content) if isinstance(csv_content, bytes) else io.StringIO(csv_content), skiprows=8)
         df = df.where(pd.notna(df), None)
         df = df.replace({np.nan: None, pd.NaT: None})
 
@@ -257,21 +226,19 @@ def process_event_data(event_name, response_key):
                 if not is_trip:
                     render_payload["event_id"] = event_id
 
-                # Use resilient session with timeout
-                render_resp = RESILIENT_SESSION.post(
-                    RENDER_URL, 
-                    data=render_payload, 
-                    timeout=(10, 30)
-                )
-                if event_name == "Trip":
-                    import sys; print(f"[DEBUG] Trip Week {i+1}: render_resp.status_code={render_resp.status_code}", file=sys.stderr)
+                # Call render endpoint directly (not via localhost)
+                render_resp_dict = render_endpoint(render_payload)
+                render_resp_status = render_resp_dict.get("status_code")
                 
-                if render_resp.status_code != 200:
+                if event_name == "Trip":
+                    import sys; print(f"[DEBUG] Trip Week {i+1}: render_resp.status_code={render_resp_status}", file=sys.stderr)
+                
+                if render_resp_status != 200:
                     if event_name == "Trip":
                         import sys; print(f"[DEBUG] Trip Week {i+1}: Render failed, skipping", file=sys.stderr)
                     continue
 
-                render_id = render_resp.json().get("render_id")
+                render_id = render_resp_dict.get("data", {}).get("render_id")
                 if not render_id:
                     if event_name == "Trip":
                         import sys; print(f"[DEBUG] Trip Week {i+1}: No render_id, skipping", file=sys.stderr)
@@ -285,21 +252,19 @@ def process_event_data(event_name, response_key):
                     "report_id": report_id
                 }
 
-                # Use resilient session for result (can take longer for CSV download)
-                result_resp = RESILIENT_SESSION.post(
-                    RESULT_URL, 
-                    data=result_payload, 
-                    timeout=(10, 120)
-                )
-                if event_name == "Trip":
-                    import sys; print(f"[DEBUG] Trip Week {i+1}: result_resp.status_code={result_resp.status_code}", file=sys.stderr)
+                # Call result endpoint directly (not via localhost)
+                result_resp_dict = result_endpoint(result_payload)
+                result_resp_status = result_resp_dict.get("status_code")
                 
-                if result_resp.status_code != 200:
+                if event_name == "Trip":
+                    import sys; print(f"[DEBUG] Trip Week {i+1}: result_resp.status_code={result_resp_status}", file=sys.stderr)
+                
+                if result_resp_status != 200:
                     if event_name == "Trip":
                         import sys; print(f"[DEBUG] Trip Week {i+1}: Result failed, skipping", file=sys.stderr)
                     continue
 
-                gdrive_link = result_resp.json().get("gdrive_link")
+                gdrive_link = result_resp_dict.get("data", {}).get("gdrive_link")
                 if not gdrive_link:
                     if event_name == "Trip":
                         import sys; print(f"[DEBUG] Trip Week {i+1}: No gdrive_link, skipping", file=sys.stderr)
