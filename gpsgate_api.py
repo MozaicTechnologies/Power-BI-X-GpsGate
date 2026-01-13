@@ -108,11 +108,21 @@ def render_endpoint(payload):
         period_start = payload.get("period_start")
         period_end = payload.get("period_end")
         
-        # Convert Unix timestamps to ISO datetime strings
+        # Convert timestamps to ISO datetime strings
+        # Handle Unix timestamps (int/float) or ISO strings
         if isinstance(period_start, (int, float)):
+            # Unix timestamp
             period_start = datetime.utcfromtimestamp(period_start).strftime("%Y-%m-%d %H:%M:%S")
+        elif isinstance(period_start, str) and "T" in period_start:
+            # ISO string like "2025-01-01T00:00:00Z" -> "2025-01-01 00:00:00"
+            period_start = period_start.replace("T", " ").replace("Z", "").split(".")[0]
+        
         if isinstance(period_end, (int, float)):
+            # Unix timestamp
             period_end = datetime.utcfromtimestamp(period_end).strftime("%Y-%m-%d %H:%M:%S")
+        elif isinstance(period_end, str) and "T" in period_end:
+            # ISO string like "2025-01-07T23:59:59Z" -> "2025-01-07 23:59:59"
+            period_end = period_end.replace("T", " ").replace("Z", "").split(".")[0]
         
         # Build GpsGate API URL
         url = f"{base_url}/comGpsGate/api/v.1/applications/{app_id}/reports/{report_id}/renderings"
