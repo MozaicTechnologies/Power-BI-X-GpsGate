@@ -120,72 +120,12 @@ def backfill_current_week():
         
         try:
             from application import create_app, db
-            from data_pipeline import process_event_data
+            from backfill_helper import backfill_current_week
             
             app = create_app()
             with app.app_context():
-                # Get week dates
-                today = datetime.now()
-                try:
-                    week_offset = int(request.args.get('week_offset', 0))
-                except:
-                    week_offset = 0
-                    
-                monday = today - timedelta(days=today.weekday() + week_offset)
-                sunday = monday + timedelta(days=6)
-                
-                endpoints = [
-                    ("Trip", "trip_data", "Trip"),
-                    ("Speeding", "speeding_data", "Speeding"),
-                    ("Idle", "idle_data", "Idle"),
-                    ("AWH", "awh_data", "AWH"),
-                    ("WH", "wh_data", "WH"),
-                    ("HA", "ha_data", "HA"),
-                    ("HB", "hb_data", "HB"),
-                    ("WU", "wu_data", "WU"),
-                ]
-                
-                all_stats = {}
-                total_inserted = 0
-                total_dupes = 0
-                total_errors = 0
-                
-                for label, response_key, event_name in endpoints:
-                    try:
-                        result = process_event_data(event_name, response_key, week_start=monday, week_end=sunday)
-                        
-                        if result and 'db_stats' in result:
-                            stats = result['db_stats']
-                            inserted = stats.get('inserted', 0)
-                            duplicates = stats.get('duplicates', 0)
-                            errors = stats.get('errors', 0)
-                            
-                            all_stats[label] = {
-                                'inserted': inserted,
-                                'duplicates': duplicates,
-                                'errors': errors
-                            }
-                            
-                            total_inserted += inserted
-                            total_dupes += duplicates
-                            total_errors += errors
-                        else:
-                            all_stats[label] = {'inserted': 0, 'duplicates': 0, 'errors': 0}
-                    except Exception as e:
-                        all_stats[label] = {
-                            'error': str(e)[:200]
-                        }
-                        total_errors += 1
-                
-                return jsonify({
-                    'success': True,
-                    'week': f"{monday.strftime('%Y-%m-%d')} to {sunday.strftime('%Y-%m-%d')}",
-                    'total_inserted': total_inserted,
-                    'total_duplicates': total_dupes,
-                    'total_errors': total_errors,
-                    'stats_by_type': all_stats,
-                    'timestamp': datetime.now().isoformat()
-                }), 200
+                result = backfill_current_week()
+                return jsonify(result), 200
         
         except Exception as main_error:
             return jsonify({
