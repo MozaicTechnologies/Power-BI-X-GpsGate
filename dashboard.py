@@ -482,30 +482,46 @@ def dashboard():
         <script>
             function startBackfill(weeks) {
                 const endpoint = weeks === 1 ? '/api/fetch-current' : '/api/backfill';
-                const body = weeks === 1 ? {} : JSON.stringify({ weeks: weeks });
+                const body = JSON.stringify({ weeks: weeks });
                 
                 fetch(endpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: body
                 })
-                .then(r => r.json())
+                .then(r => {
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.json();
+                })
                 .then(data => {
-                    alert('✓ Backfill started!\\n\\nOperation ID: ' + data.operation_id + '\\nEstimated time: ' + data.estimated_duration_minutes + ' minutes');
+                    const opId = data.operation_id || 'Unknown';
+                    const duration = data.estimated_duration_minutes || '?';
+                    alert('✓ Backfill started!\n\nOperation ID: ' + opId + '\nEstimated time: ' + duration + ' minutes');
+                    updateLogs('✓ Backfill started: ' + opId + ' (' + weeks + ' weeks)');
                     checkStatus();
                 })
-                .catch(e => alert('Error: ' + e));
+                .catch(e => {
+                    alert('❌ Error starting backfill: ' + e.message);
+                    updateLogs('❌ Backfill error: ' + e.message);
+                });
             }
             
             function checkStatus() {
                 fetch('/api/health')
-                .then(r => r.json())
+                .then(r => {
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.json();
+                })
                 .then(data => {
                     const status = data.status || 'unknown';
-                    const ops = data.active_backfill_operations || 0;
-                    alert('✓ API Status\n\nStatus: ' + status + '\nActive operations: ' + ops);
+                    const ops = data.active_backfill_operations !== undefined ? data.active_backfill_operations : 0;
+                    alert('✓ API Health\n\nStatus: ' + status + '\nActive operations: ' + ops);
+                    updateLogs('✓ Health check: ' + ops + ' active operations');
                 })
-                .catch(e => alert('❌ Error: ' + e.message));
+                .catch(e => {
+                    alert('❌ Error checking status: ' + e.message);
+                    updateLogs('❌ Health check failed: ' + e.message);
+                });
             }
             
             function callEndpoint(endpoint, method = 'GET') {
@@ -515,11 +531,27 @@ def dashboard():
                 };
                 
                 fetch(endpoint, options)
-                .then(r => r.json())
-                .then(data => {
-                    alert('✓ ' + endpoint + '\n\nResponse:\n' + JSON.stringify(data, null, 2).substring(0, 200));
+                .then(r => {
+                    if (!r.ok) {
+                        throw new Error('HTTP ' + r.status + ': ' + r.statusText);
+                    }
+                    return r.text().then(text => {
+                        try {
+                            return JSON.parse(text);
+                        } catch(e) {
+                            return { raw: text };
+                        }
+                    });
                 })
-                .catch(e => alert('❌ Error calling ' + endpoint + ':\n' + e.message));
+                .then(data => {
+                    const display = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+                    alert('✓ ' + endpoint + '\n\nStatus: Success\n\nResponse:\n' + display.substring(0, 300));
+                    updateLogs('✓ API call: ' + endpoint);
+                })
+                .catch(e => {
+                    alert('❌ Error calling ' + endpoint + ':\n' + e.message);
+                    updateLogs('❌ API error: ' + endpoint + ' - ' + e.message);
+                });
             }
             
             function runMigration() {
