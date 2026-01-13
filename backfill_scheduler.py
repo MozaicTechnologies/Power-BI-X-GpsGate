@@ -23,24 +23,30 @@ def init_db():
     """Initialize database schema - run migrations and create tables"""
     try:
         from application import db, create_app
-        from flask_migrate import upgrade
+        import os
         
         app = create_app()
         with app.app_context():
-            # Run migrations
-            try:
-                upgrade()
-                migration_status = "Migrations completed successfully"
-            except Exception as mig_err:
-                migration_status = f"Migration warning: {str(mig_err)}"
+            # Try to run migrations if they exist
+            migration_status = "Skipped (no migrations folder)"
+            migrations_path = os.path.join(os.path.dirname(__file__), 'migrations')
             
-            # Create all tables if not exist
+            if os.path.exists(migrations_path):
+                try:
+                    from flask_migrate import upgrade
+                    upgrade()
+                    migration_status = "Migrations completed successfully"
+                except Exception as mig_err:
+                    migration_status = f"Migration skipped: {str(mig_err)[:100]}"
+            
+            # Always create all tables if not exist
             db.create_all()
             
             return jsonify({
                 'success': True,
-                'message': 'Database initialized',
+                'message': 'Database initialized successfully',
                 'migration_status': migration_status,
+                'tables_created': True,
                 'timestamp': datetime.now().isoformat()
             }), 200
             
