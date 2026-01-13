@@ -556,7 +556,7 @@ def dashboard():
             
             function runMigration() {
                 document.getElementById('migrateBtn').disabled = true;
-                document.getElementById('migrateBtn').textContent = '⏳ Running migration...';
+                document.getElementById('migrateBtn').textContent = 'Running migration...';
                 
                 fetch('/api/dashboard/migrate', {
                     method: 'POST',
@@ -565,21 +565,21 @@ def dashboard():
                 .then(r => r.json())
                 .then(data => {
                     document.getElementById('migrateBtn').disabled = false;
-                    document.getElementById('migrateBtn').textContent = '🔧 Fix Database Schema';
+                    document.getElementById('migrateBtn').textContent = 'Fix Database Schema';
                     
                     if (data.status === 'success') {
-                        alert('✅ Database migration successful!\\n\\nThe is_duplicate column has been added to all tables.\\n\\nYou can now start the backfill.');
-                        updateLogs('✅ Database migration completed successfully');
+                        alert('Database migration successful!\n\nThe is_duplicate column has been added to all tables.\n\nYou can now start the backfill.');
+                        updateLogs('[SUCCESS] Database migration completed successfully');
                     } else {
-                        alert('❌ Migration failed:\\n\\n' + data.message);
-                        updateLogs('❌ Migration failed: ' + data.message);
+                        alert('Migration failed:\n\n' + data.message);
+                        updateLogs('[ERROR] Migration failed: ' + data.message);
                     }
                 })
                 .catch(e => {
                     document.getElementById('migrateBtn').disabled = false;
-                    document.getElementById('migrateBtn').textContent = '🔧 Fix Database Schema';
-                    alert('❌ Error: ' + e);
-                    updateLogs('❌ Migration error: ' + e);
+                    document.getElementById('migrateBtn').textContent = 'Fix Database Schema';
+                    alert('Error: ' + e);
+                    updateLogs('[ERROR] Migration error: ' + e);
                 });
             }
             
@@ -593,7 +593,7 @@ def dashboard():
                         // Update status badge
                         const badge = document.getElementById('statusBadge');
                         if (data.active_operations > 0) {
-                            badge.textContent = '🟢 Syncing...';
+                            badge.textContent = 'Syncing...';
                             badge.className = 'status-badge running';
                         } else {
                             badge.textContent = 'Idle';
