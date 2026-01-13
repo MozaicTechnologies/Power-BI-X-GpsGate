@@ -228,20 +228,20 @@ def process_event_data(event_name, response_key):
                     },
                     {
                         "parameterName": "Tag" if event_id else "TagID",
-                        "arrayValues": [str(tag_id)]
+                        "arrayValues": [tag_id]
                     }
                 ]
                 
                 if event_id:
                     parameters.append({
                         "parameterName": "EventRule",
-                        "arrayValues": [str(event_id)]
+                        "arrayValues": [event_id]
                     })
                 
                 render_body = {
                     "parameters": parameters,
                     "reportFormatId": 2,
-                    "reportId": str(report_id),
+                    "reportId": int(report_id),
                     "sendEmail": False
                 }
                 
@@ -259,7 +259,12 @@ def process_event_data(event_name, response_key):
                 )
                 
                 if event_name == "Trip":
-                    import sys; print(f"[DEBUG] Trip Week {i+1}: render_resp.status_code={render_resp.status_code}", file=sys.stderr)
+                    import sys
+                    print(f"[DEBUG] Trip Week {i+1}: render_resp.status_code={render_resp.status_code}", file=sys.stderr)
+                    print(f"[DEBUG] Trip Week {i+1}: render URL={url}", file=sys.stderr)
+                    print(f"[DEBUG] Trip Week {i+1}: render body={render_body}", file=sys.stderr)
+                    if render_resp.status_code != 200:
+                        print(f"[DEBUG] Trip Week {i+1}: Render response={render_resp.text[:500]}", file=sys.stderr)
                 
                 if render_resp.status_code != 200:
                     if event_name == "Trip":
