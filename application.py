@@ -30,4 +30,8 @@ def create_app():
     from backfill_scheduler import backfill_api
     app.register_blueprint(backfill_api)
     
+    # Register manual backfill/fetch API
+    from api import api_bp
+    app.register_blueprint(api_bp)
+    
     return app
