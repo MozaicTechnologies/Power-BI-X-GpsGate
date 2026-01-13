@@ -152,7 +152,7 @@ def render_endpoint(payload):
         body = {
             "parameters": parameters,
             "reportFormatId": 2,
-            "reportId": int(report_id),
+            "reportId": str(report_id),  # Send as string, not int
             "sendEmail": False
         }
         
