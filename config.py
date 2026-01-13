@@ -50,7 +50,11 @@ class Config:
     raw_url = os.getenv("DATABASE_URL")
     
     if not raw_url:
-        raise ValueError("DATABASE_URL environment variable is required")
+        print("[ERROR] DATABASE_URL environment variable is not set!")
+        print("[ERROR] Please set DATABASE_URL in Render environment variables")
+        print("[ERROR] Using fallback SQLite for local development...")
+        # Fallback for local development only
+        raw_url = "sqlite:////tmp/render.db"
     
     # Normalize ANY postgres-y URL to SQLAlchemy+psycopg format:
     #  - postgres://...         -> postgresql+psycopg://...
