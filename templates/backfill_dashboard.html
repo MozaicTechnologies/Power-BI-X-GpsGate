@@ -279,7 +279,7 @@
             </div>
             
             <div class="card">
-                <h2>📊 Record Stats</h2>
+                <h2>📊 Record Stats (8 Event Types)</h2>
                 <div id="statsContainer">
                     <div class="stat">
                         <span class="stat-label">Trip Events:</span>
@@ -297,6 +297,22 @@
                         <span class="stat-label">AWH Events:</span>
                         <span class="stat-value" id="stat-AWH">-</span>
                     </div>
+                    <div class="stat">
+                        <span class="stat-label">WH Events:</span>
+                        <span class="stat-value" id="stat-WH">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">HA Events:</span>
+                        <span class="stat-value" id="stat-HA">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">HB Events:</span>
+                        <span class="stat-value" id="stat-HB">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">WU Events:</span>
+                        <span class="stat-value" id="stat-WU">-</span>
+                    </div>
                 </div>
             </div>
             
@@ -306,6 +322,21 @@
                     <div class="logs-empty">Logs will appear here...</div>
                 </div>
                 <div class="timestamp">Last log update: <span id="logTimestamp">-</span></div>
+            </div>
+            
+            <div class="card card-full">
+                <h2>📚 API Endpoints Reference</h2>
+                <div style="font-size: 12px; line-height: 1.8; color: #666;">
+                    <strong style="color: #333;">Available Endpoints:</strong><br>
+                    <code style="background: #f5f5f5; padding: 2px 6px; border-radius: 3px;">GET /api/health</code> - Service health check<br>
+                    <code style="background: #f5f5f5; padding: 2px 6px; border-radius: 3px;">GET /api/backfill/status</code> - Database status & stats<br>
+                    <code style="background: #f5f5f5; padding: 2px 6px; border-radius: 3px;">POST/GET /api/backfill/current-week</code> - Trigger backfill<br>
+                    <code style="background: #f5f5f5; padding: 2px 6px; border-radius: 3px;">POST /api/init-db</code> - Initialize database<br>
+                    <code style="background: #f5f5f5; padding: 2px 6px; border-radius: 3px;">GET /api/dashboard</code> - This dashboard<br>
+                    <br>
+                    <strong style="color: #333;">Event Types (8 total):</strong><br>
+                    Trip, Speeding, Idle, AWH, WH, HA, HB, WU
+                </div>
             </div>
         </div>
     </div>
@@ -420,21 +451,30 @@
                     document.getElementById('totalRecords').textContent = data.total_records.toLocaleString();
                     document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
                     
+                    // Expected event types
+                    const eventTypes = ['Trip', 'Speeding', 'Idle', 'AWH', 'WH', 'HA', 'HB', 'WU'];
+                    
                     if (data.stats_by_type) {
-                        for (const [type, stats] of Object.entries(data.stats_by_type)) {
+                        for (const type of eventTypes) {
+                            const stats = data.stats_by_type[type];
                             const elem = document.getElementById(`stat-${type}`);
                             if (elem) {
-                                if (stats.error) {
+                                if (!stats) {
+                                    elem.textContent = '0 (0 valid)';
+                                } else if (stats.error) {
                                     elem.textContent = '⚠️ Error';
                                     elem.title = stats.error.substring(0, 200);
                                 } else {
-                                    elem.textContent = `${stats.total || 0} (${stats.valid || 0} valid)`;
+                                    const total = stats.total || 0;
+                                    const valid = stats.valid || 0;
+                                    elem.textContent = `${total} (${valid} valid)`;
                                 }
                             }
                         }
                     }
                     
                     addLog('✓ Status retrieved successfully');
+                    addLog(`✓ All 8 event types loaded: Trip, Speeding, Idle, AWH, WH, HA, HB, WU`);
                     showAlert('✅ Database connected and responding', 'info');
                 } else {
                     showAlert(`⚠️ Status check: ${data.error}`, 'error');
