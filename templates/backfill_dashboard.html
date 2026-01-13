@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPS Gate Backfill Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        .header h1 {
+            color: #333;
+            margin-bottom: 5px;
+        }
+        
+        .header p {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-secondary {
+            background: #48bb78;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #38a169;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(72, 187, 120, 0.4);
+        }
+        
+        .btn-refresh {
+            background: #4299e1;
+            color: white;
+        }
+        
+        .btn-refresh:hover {
+            background: #3182ce;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(66, 153, 225, 0.4);
+        }
+        
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .status-loading {
+            background: #faf089;
+            color: #744210;
+        }
+        
+        .status-success {
+            background: #c6f6d5;
+            color: #22543d;
+        }
+        
+        .status-error {
+            background: #fed7d7;
+            color: #742a2a;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        .card h2 {
+            font-size: 16px;
+            color: #333;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .card-full {
+            grid-column: 1 / -1;
+        }
+        
+        .stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #eee;
+            font-size: 14px;
+        }
+        
+        .stat:last-child {
+            border-bottom: none;
+        }
+        
+        .stat-label {
+            color: #666;
+            font-weight: 500;
+        }
+        
+        .stat-value {
+            color: #333;
+            font-weight: 700;
+        }
+        
+        .logs {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        
+        .logs-empty {
+            color: #858585;
+            font-style: italic;
+        }
+        
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(0, 0, 0, 0.1);
+            border-radius: 50%;
+            border-top: 2px solid #667eea;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .alert {
+            padding: 12px 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+        
+        .alert-error {
+            background: #fed7d7;
+            color: #742a2a;
+            border-left: 4px solid #fc8181;
+        }
+        
+        .alert-success {
+            background: #c6f6d5;
+            color: #22543d;
+            border-left: 4px solid #68d391;
+        }
+        
+        .alert-info {
+            background: #bee3f8;
+            color: #2c5282;
+            border-left: 4px solid #63b3ed;
+        }
+        
+        .timestamp {
+            font-size: 12px;
+            color: #999;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 GPS Gate Backfill Dashboard</h1>
+            <p>Manage and monitor daily data synchronization</p>
+            
+            <div class="controls">
+                <button class="btn-primary" onclick="triggerBackfill()" id="syncBtn">
+                    ▶️ Manual Sync Now
+                </button>
+                <button class="btn-refresh" onclick="checkStatus()" id="statusBtn">
+                    🔄 Check Status
+                </button>
+            </div>
+        </div>
+        
+        <div id="alertContainer"></div>
+        
+        <div class="grid">
+            <div class="card">
+                <h2>⚡ Quick Status</h2>
+                <div class="stat">
+                    <span class="stat-label">Service Status:</span>
+                    <span class="stat-value" id="serviceStatus">Loading...</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Total Records:</span>
+                    <span class="stat-value" id="totalRecords">-</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Last Updated:</span>
+                    <span class="stat-value" id="lastUpdated">Never</span>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>📊 Record Stats</h2>
+                <div id="statsContainer">
+                    <div class="stat">
+                        <span class="stat-label">Trip Events:</span>
+                        <span class="stat-value" id="stat-Trip">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Speeding Events:</span>
+                        <span class="stat-value" id="stat-Speeding">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Idle Events:</span>
+                        <span class="stat-value" id="stat-Idle">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">AWH Events:</span>
+                        <span class="stat-value" id="stat-AWH">-</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card card-full">
+                <h2>📋 Operation Logs</h2>
+                <div class="logs" id="logOutput">
+                    <div class="logs-empty">Logs will appear here...</div>
+                </div>
+                <div class="timestamp">Last log update: <span id="logTimestamp">-</span></div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let isWorking = false;
+        
+        async function triggerBackfill() {
+            if (isWorking) return;
+            isWorking = true;
+            
+            const btn = document.getElementById('syncBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Syncing...';
+            
+            addLog('⏳ Starting backfill...');
+            
+            try {
+                const response = await fetch('/api/backfill/current-week', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showAlert('✅ Backfill completed successfully!', 'success');
+                    addLog(`✓ Week: ${data.week}`);
+                    addLog(`✓ Inserted: ${data.total_inserted} records`);
+                    addLog(`✓ Duplicates: ${data.total_duplicates}`);
+                    addLog(`✓ Errors: ${data.total_errors}`);
+                    
+                    if (data.stats_by_type) {
+                        addLog('\nStats by type:');
+                        for (const [type, stats] of Object.entries(data.stats_by_type)) {
+                            if (stats.error) {
+                                addLog(`  ${type}: ERROR - ${stats.error.substring(0, 100)}...`);
+                            } else {
+                                addLog(`  ${type}: +${stats.inserted} | Dupes: ${stats.duplicates} | Errors: ${stats.errors}`);
+                            }
+                        }
+                    }
+                    
+                    await checkStatus();
+                } else {
+                    showAlert(`❌ Backfill failed: ${data.error}`, 'error');
+                    addLog(`✗ Error: ${data.error}`);
+                }
+            } catch (error) {
+                showAlert(`❌ Error: ${error.message}`, 'error');
+                addLog(`✗ Exception: ${error.message}`);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '▶️ Manual Sync Now';
+                isWorking = false;
+            }
+        }
+        
+        async function checkStatus() {
+            if (isWorking) return;
+            
+            addLog('🔍 Checking status...');
+            
+            try {
+                const response = await fetch('/api/backfill/status');
+                const data = await response.json();
+                
+                if (data.success) {
+                    document.getElementById('serviceStatus').innerHTML = '<span class="status-badge status-success">✓ Online</span>';
+                    document.getElementById('totalRecords').textContent = data.total_records.toLocaleString();
+                    document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
+                    
+                    if (data.stats_by_type) {
+                        for (const [type, stats] of Object.entries(data.stats_by_type)) {
+                            const elem = document.getElementById(`stat-${type}`);
+                            if (elem) {
+                                if (stats.error) {
+                                    elem.textContent = '⚠️ Error';
+                                    elem.title = stats.error.substring(0, 200);
+                                } else {
+                                    elem.textContent = `${stats.total || 0} (${stats.valid || 0} valid)`;
+                                }
+                            }
+                        }
+                    }
+                    
+                    addLog('✓ Status retrieved successfully');
+                    showAlert('✅ Database connected and responding', 'info');
+                } else {
+                    showAlert(`⚠️ Status check: ${data.error}`, 'error');
+                    addLog(`✗ Status error: ${data.error}`);
+                }
+            } catch (error) {
+                showAlert(`❌ Cannot reach service: ${error.message}`, 'error');
+                document.getElementById('serviceStatus').innerHTML = '<span class="status-badge status-error">✗ Offline</span>';
+                addLog(`✗ Connection failed: ${error.message}`);
+            }
+        }
+        
+        function addLog(message) {
+            const logOutput = document.getElementById('logOutput');
+            if (logOutput.querySelector('.logs-empty')) {
+                logOutput.innerHTML = '';
+            }
+            
+            const timestamp = new Date().toLocaleTimeString();
+            logOutput.innerHTML += `[${timestamp}] ${message}\n`;
+            logOutput.scrollTop = logOutput.scrollHeight;
+            
+            document.getElementById('logTimestamp').textContent = timestamp;
+        }
+        
+        function showAlert(message, type) {
+            const container = document.getElementById('alertContainer');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            
+            container.innerHTML = '';
+            container.appendChild(alert);
+            
+            setTimeout(() => alert.remove(), 5000);
+        }
+        
+        // Check status on page load
+        window.addEventListener('load', () => {
+            checkStatus();
+        });
+    </script>
+</body>
+</html>

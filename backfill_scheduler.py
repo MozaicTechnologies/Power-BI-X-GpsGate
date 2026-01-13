@@ -3,11 +3,11 @@
 API endpoint for scheduled backfill (current week data)
 Can be called by external cron services, GitHub Actions, or Render background jobs
 """
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, render_template
 from datetime import datetime, timedelta
 import os
 
-backfill_api = Blueprint('backfill_api', __name__, url_prefix='/api')
+backfill_api = Blueprint('backfill_api', __name__, url_prefix='/api', template_folder='../templates')
 
 @backfill_api.route('/health', methods=['GET'])
 def health():
@@ -165,3 +165,8 @@ def backfill_status():
             'error': str(e),
             'traceback': traceback.format_exc()
         }), 500
+
+@backfill_api.route('/dashboard', methods=['GET'])
+def dashboard():
+    """Dashboard for monitoring and triggering backfills"""
+    return render_template('backfill_dashboard.html')
