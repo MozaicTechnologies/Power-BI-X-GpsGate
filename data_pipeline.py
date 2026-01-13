@@ -13,7 +13,6 @@ import io
 from urllib.parse import urljoin
 from models import db
 from db_storage import store_event_data_to_db
-from gpsgate_api import render_endpoint, result_endpoint, download_csv_from_gdrive
 import json
 import numpy as np
 import time as pytime
@@ -212,65 +211,111 @@ def process_event_data(event_name, response_key):
                 print(f"  Week {i+1}/{len(weeks)}: {week['start_date']} -> {week['end_date']}")
 
             try:
-                render_payload = {
-                    "app_id": app_id,
-                    "period_start": week["week_start"],
-                    "period_end": week["week_end"],
-                    "tag_id": tag_id,
-                    "token": token,
-                    "base_url": base_url,
-                    "report_id": report_id
+                # Build GpsGate render request parameters
+                period_start = week["week_start"].replace("T", " ").replace("Z", "").split(".")[0] if "T" in week["week_start"] else week["week_start"]
+                period_end = week["week_end"].replace("T", " ").replace("Z", "").split(".")[0] if "T" in week["week_end"] else week["week_end"]
+                
+                # Build GpsGate rendering URL and parameters
+                url = f"{base_url}/comGpsGate/api/v.1/applications/{app_id}/reports/{report_id}/renderings"
+                
+                parameters = [
+                    {
+                        "parameterName": "Period",
+                        "periodStart": period_start,
+                        "periodEnd": period_end,
+                        "value": "Custom",
+                        "visible": False
+                    },
+                    {
+                        "parameterName": "Tag" if event_id else "TagID",
+                        "arrayValues": [str(tag_id)]
+                    }
+                ]
+                
+                if event_id:
+                    parameters.append({
+                        "parameterName": "EventRule",
+                        "arrayValues": [str(event_id)]
+                    })
+                
+                render_body = {
+                    "parameters": parameters,
+                    "reportFormatId": 2,
+                    "reportId": str(report_id),
+                    "sendEmail": False
                 }
-
-                # 🔒 CRITICAL FIX: Trip MUST NOT send event_id
-                if not is_trip:
-                    render_payload["event_id"] = event_id
-
-                # Call render endpoint directly (not via localhost)
-                render_resp_dict = render_endpoint(render_payload)
-                render_resp_status = render_resp_dict.get("status_code")
+                
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": token
+                }
+                
+                # Make render request to GpsGate
+                render_resp = RESILIENT_SESSION.post(
+                    url,
+                    json=render_body,
+                    headers=headers,
+                    timeout=(10, 30)
+                )
                 
                 if event_name == "Trip":
-                    import sys; print(f"[DEBUG] Trip Week {i+1}: render_resp.status_code={render_resp_status}", file=sys.stderr)
+                    import sys; print(f"[DEBUG] Trip Week {i+1}: render_resp.status_code={render_resp.status_code}", file=sys.stderr)
                 
-                if render_resp_status != 200:
+                if render_resp.status_code != 200:
                     if event_name == "Trip":
-                        import sys; print(f"[DEBUG] Trip Week {i+1}: Render failed, skipping", file=sys.stderr)
+                        import sys; print(f"[DEBUG] Trip Week {i+1}: Render failed, skipping. Response: {render_resp.text[:200]}", file=sys.stderr)
                     continue
 
-                render_id = render_resp_dict.get("data", {}).get("render_id")
+                render_data = render_resp.json()
+                render_id = render_data.get("id") or render_data.get("render_id")
                 if not render_id:
                     if event_name == "Trip":
                         import sys; print(f"[DEBUG] Trip Week {i+1}: No render_id, skipping", file=sys.stderr)
                     continue
 
-                result_payload = {
-                    "app_id": app_id,
-                    "render_id": render_id,
-                    "token": token,
-                    "base_url": base_url,
-                    "report_id": report_id
+                # Get result/download link from GpsGate
+                result_url = f"{base_url}/comGpsGate/api/v.1/applications/{app_id}/reports/{report_id}/renderings/{render_id}/result"
+                result_headers = {
+                    "Authorization": token
                 }
-
-                # Call result endpoint directly (not via localhost)
-                result_resp_dict = result_endpoint(result_payload)
-                result_resp_status = result_resp_dict.get("status_code")
+                
+                result_resp = RESILIENT_SESSION.get(
+                    result_url,
+                    headers=result_headers,
+                    timeout=(10, 120)
+                )
                 
                 if event_name == "Trip":
-                    import sys; print(f"[DEBUG] Trip Week {i+1}: result_resp.status_code={result_resp_status}", file=sys.stderr)
+                    import sys; print(f"[DEBUG] Trip Week {i+1}: result_resp.status_code={result_resp.status_code}", file=sys.stderr)
                 
-                if result_resp_status != 200:
+                if result_resp.status_code != 200:
                     if event_name == "Trip":
                         import sys; print(f"[DEBUG] Trip Week {i+1}: Result failed, skipping", file=sys.stderr)
                     continue
 
-                gdrive_link = result_resp_dict.get("data", {}).get("gdrive_link")
+                result_data = result_resp.json()
+                gdrive_link = result_data.get("gdrive_link") or result_data.get("link")
                 if not gdrive_link:
                     if event_name == "Trip":
                         import sys; print(f"[DEBUG] Trip Week {i+1}: No gdrive_link, skipping", file=sys.stderr)
                     continue
 
-                csv_content = download_csv_from_gdrive(gdrive_link, token)
+                csv_headers = {}
+                if "omantracking2.com" in gdrive_link:
+                    csv_headers["Authorization"] = token
+                
+                csv_resp = RESILIENT_SESSION.get(
+                    gdrive_link,
+                    headers=csv_headers,
+                    timeout=(10, 120)
+                )
+                
+                if csv_resp.status_code != 200:
+                    if event_name == "Trip":
+                        import sys; print(f"[DEBUG] Trip Week {i+1}: CSV download failed, skipping", file=sys.stderr)
+                    continue
+                
+                csv_content = csv_resp.content
                 if not csv_content:
                     import sys; print(f"[{event_name}] Week {i+1}: No CSV content", file=sys.stderr)
                     if event_name == "Trip":
