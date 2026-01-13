@@ -10,11 +10,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Use local DATABASE_URL (not live) - Remove the override that was forcing live database
-print("=" * 80)
-print("BACKFILL ALL 8 ENDPOINTS - WEEK 1 (JAN 1-7, 2025) - DIRECT PYTHON")
-print("=" * 80)
-print(f"\nUsing Database: {os.environ['DATABASE_URL'][:60]}...\n")
-
 from application import create_app
 from data_pipeline import process_event_data
 from datetime import datetime, timedelta
@@ -23,29 +18,59 @@ import json
 
 app = create_app()
 
-# Build weekly schedule
-def build_weekly_schedule():
-    start = datetime(2025, 1, 1)
-    end = datetime(2025, 12, 31)
-    weeks = []
-    current = start
-    week_num = 1
-    
-    while current <= end:
-        week_end = min(current + timedelta(days=6), end)
-        weeks.append({
-            "week": week_num,
-            "start_date": current.strftime("%Y-%m-%d"),
-            "end_date": week_end.strftime("%Y-%m-%d"),
-            "week_start": int(current.timestamp()),
-            "week_end": int((week_end + timedelta(days=1)).timestamp()),
-        })
-        current = week_end + timedelta(days=1)
-        week_num += 1
-    
-    return weeks
+# Check if fetching current week or historical
+FETCH_CURRENT_WEEK = os.environ.get('FETCH_CURRENT_WEEK', 'false').lower() == 'true'
 
-weeks = build_weekly_schedule()[:1]  # Only week 1
+# Build weekly schedule
+def build_weekly_schedule(current_week_only=False):
+    if current_week_only:
+        # Calculate current week (today's date determines which week)
+        today = datetime.now()
+        # Find Monday of current week
+        days_since_monday = today.weekday()
+        week_start = today - timedelta(days=days_since_monday)
+        week_end = week_start + timedelta(days=6)
+        
+        print("=" * 80)
+        print(f"BACKFILL - CURRENT WEEK ({week_start.strftime('%b %d')} - {week_end.strftime('%b %d, %Y')})")
+        print("=" * 80)
+        print(f"\nUsing Database: {os.environ['DATABASE_URL'][:60]}...\n")
+        
+        return [{
+            "week": 1,
+            "start_date": week_start.strftime("%Y-%m-%d"),
+            "end_date": week_end.strftime("%Y-%m-%d"),
+            "week_start": int(week_start.timestamp()),
+            "week_end": int((week_end + timedelta(days=1)).timestamp()),
+        }]
+    else:
+        # Historical 2025 schedule
+        print("=" * 80)
+        print("BACKFILL ALL 8 ENDPOINTS - HISTORICAL WEEKS (2025) - DIRECT PYTHON")
+        print("=" * 80)
+        print(f"\nUsing Database: {os.environ['DATABASE_URL'][:60]}...\n")
+        
+        start = datetime(2025, 1, 1)
+        end = datetime(2025, 12, 31)
+        weeks = []
+        current = start
+        week_num = 1
+        
+        while current <= end:
+            week_end = min(current + timedelta(days=6), end)
+            weeks.append({
+                "week": week_num,
+                "start_date": current.strftime("%Y-%m-%d"),
+                "end_date": week_end.strftime("%Y-%m-%d"),
+                "week_start": int(current.timestamp()),
+                "week_end": int((week_end + timedelta(days=1)).timestamp()),
+            })
+            current = week_end + timedelta(days=1)
+            week_num += 1
+        
+        return weeks
+
+weeks = build_weekly_schedule(current_week_only=FETCH_CURRENT_WEEK)[:1]  # Only first week
 week = weeks[0]
 
 print(f"Processing Week 1: {week['start_date']} too {week['end_date']}\n")

@@ -186,8 +186,13 @@ def fetch_current_data():
                     'backfill_direct_python.py'
                 )
                 
+                # Set environment variable to fetch current week
+                env = os.environ.copy()
+                env['FETCH_CURRENT_WEEK'] = 'true'
+                
                 result = subprocess.run(
                     ['python', script_path],
+                    env=env,
                     capture_output=True,
                     text=True,
                     timeout=1800  # 30 min timeout for current week
