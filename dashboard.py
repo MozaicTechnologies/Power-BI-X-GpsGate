@@ -3,7 +3,7 @@ Dashboard route for monitoring backfill operations and system status.
 Provides HTML dashboard with Quick Status, Recent Stats, Operation Logs, and API Reference.
 """
 
-from flask import Blueprint, render_template_string, jsonify
+from flask import Blueprint, render_template_string, jsonify, make_response
 from datetime import datetime
 import os
 
@@ -27,7 +27,6 @@ def add_log(message, level="info"):
 @dashboard_bp.route('/dashboard', methods=['GET'])
 def dashboard():
     """Main dashboard HTML page"""
-    
     html_template = '''
     <!DOCTYPE html>
     <html lang="en">
@@ -566,7 +565,11 @@ def dashboard():
     </html>
     '''
     
-    return render_template_string(html_template)
+    response = make_response(render_template_string(html_template))
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 @dashboard_bp.route('/dashboard/stats', methods=['GET'])
 def dashboard_stats():
