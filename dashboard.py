@@ -496,7 +496,7 @@ def dashboard():
                 .then(data => {
                     const opId = data.operation_id || 'Unknown';
                     const duration = data.estimated_duration_minutes || '?';
-                    alert('Backfill started!\n\nOperation ID: ' + opId + '\nEstimated time: ' + duration + ' minutes');
+                    alert('Backfill started!\\n\\nOperation ID: ' + opId + '\\nEstimated time: ' + duration + ' minutes');
                     updateLogs('✓ Backfill started: ' + opId + ' (' + weeks + ' weeks)');
                     checkStatus();
                 })
@@ -515,7 +515,7 @@ def dashboard():
                 .then(data => {
                     const status = data.status || 'unknown';
                     const ops = data.active_backfill_operations !== undefined ? data.active_backfill_operations : 0;
-                    alert('API Health\n\nStatus: ' + status + '\nActive operations: ' + ops);
+                    alert('API Health\\n\\nStatus: ' + status + '\\nActive operations: ' + ops);
                     updateLogs('✓ Health check: ' + ops + ' active operations');
                 })
                 .catch(e => {
@@ -545,11 +545,11 @@ def dashboard():
                 })
                 .then(data => {
                     const display = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-                    alert('API: ' + endpoint + '\n\nStatus: Success\n\nResponse:\n' + display.substring(0, 300));
+                    alert('API: ' + endpoint + '\\n\\nStatus: Success\\n\\nResponse:\\n' + display.substring(0, 300));
                     updateLogs('✓ API call: ' + endpoint);
                 })
                 .catch(e => {
-                    alert('Error calling ' + endpoint + ':\n' + e.message);
+                    alert('Error calling ' + endpoint + ':\\n' + e.message);
                     updateLogs('✗ API error: ' + endpoint + ' - ' + e.message);
                 });
             }
@@ -568,10 +568,10 @@ def dashboard():
                     document.getElementById('migrateBtn').textContent = 'Fix Database Schema';
                     
                     if (data.status === 'success') {
-                        alert('Database migration successful!\n\nThe is_duplicate column has been added to all tables.\n\nYou can now start the backfill.');
+                        alert('Database migration successful!\\n\\nThe is_duplicate column has been added to all tables.\\n\\nYou can now start the backfill.');
                         updateLogs('[SUCCESS] Database migration completed successfully');
                     } else {
-                        alert('Migration failed:\n\n' + data.message);
+                        alert('Migration failed:\\n\\n' + data.message);
                         updateLogs('[ERROR] Migration failed: ' + data.message);
                     }
                 })
