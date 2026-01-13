@@ -45,8 +45,8 @@ def get_max_weeks():
     weeks = (today - start).days // 7 + 1
     return max(1, weeks)
 
-MAX_WEEKS_TRIP_WH = 54  # Trip & WH: 1 week per call (incremental weekly pulls)
-MAX_WEEKS_OTHER = 54    # Other events: 1 week per call (incremental weekly pulls)
+MAX_WEEKS_TRIP_WH = 1  # Trip & WH: 1 week per call (incremental weekly pulls)
+MAX_WEEKS_OTHER = 1    # Other events: 1 week per call (incremental weekly pulls)
 
 # Centralized Base URL for Microservices (local development default)
 BASE_SERVICE_URL = os.getenv("BACKEND_HOST", "http://localhost:5000")

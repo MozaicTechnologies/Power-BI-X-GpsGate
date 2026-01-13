@@ -103,8 +103,14 @@ for i, (name, event_type, response_key) in enumerate(ENDPOINTS, 1):
     print("-" * 80)
     
     payload = trip_payload if event_type == "Trip" else payload_template.copy()
-    payload["period_start"] = week['week_start']
-    payload["period_end"] = week['week_end']
+    
+    # Convert timestamps to ISO format for render table matching
+    from datetime import datetime
+    period_start_iso = datetime.utcfromtimestamp(week['week_start']).strftime('%Y-%m-%dT%H:%M:%SZ')
+    period_end_iso = datetime.utcfromtimestamp(week['week_end']).strftime('%Y-%m-%dT%H:%M:%SZ')
+    
+    payload["period_start"] = period_start_iso
+    payload["period_end"] = period_end_iso
     
     # Add event_id if needed
     if event_ids[event_type]:
