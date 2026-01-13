@@ -118,42 +118,50 @@ def backfill_current_week():
 def backfill_status():
     """Get status of last backfill"""
     try:
-        from application import db
+        from application import db, create_app
         from models import FactTrip, FactSpeeding, FactIdle, FactAWH, FactWH, FactHA, FactHB, FactWU
         
-        tables = [
-            ('Trip', FactTrip),
-            ('Speeding', FactSpeeding),
-            ('Idle', FactIdle),
-            ('AWH', FactAWH),
-            ('WH', FactWH),
-            ('HA', FactHA),
-            ('HB', FactHB),
-            ('WU', FactWU),
-        ]
-        
-        stats = {}
-        total_records = 0
-        
-        for name, model in tables:
-            count = db.session.query(model).count()
-            duplicate_count = db.session.query(model).filter_by(is_duplicate=True).count()
-            stats[name] = {
-                'total': count,
-                'duplicates': duplicate_count,
-                'valid': count - duplicate_count
-            }
-            total_records += count
-        
-        return jsonify({
-            'success': True,
-            'total_records': total_records,
-            'stats_by_type': stats,
-            'timestamp': datetime.now().isoformat()
-        }), 200
+        # Ensure we're in app context
+        app = create_app()
+        with app.app_context():
+            tables = [
+                ('Trip', FactTrip),
+                ('Speeding', FactSpeeding),
+                ('Idle', FactIdle),
+                ('AWH', FactAWH),
+                ('WH', FactWH),
+                ('HA', FactHA),
+                ('HB', FactHB),
+                ('WU', FactWU),
+            ]
+            
+            stats = {}
+            total_records = 0
+            
+            for name, model in tables:
+                try:
+                    count = db.session.query(model).count()
+                    duplicate_count = db.session.query(model).filter_by(is_duplicate=True).count()
+                    stats[name] = {
+                        'total': count,
+                        'duplicates': duplicate_count,
+                        'valid': count - duplicate_count
+                    }
+                    total_records += count
+                except Exception as table_error:
+                    stats[name] = {'error': str(table_error)}
+            
+            return jsonify({
+                'success': True,
+                'total_records': total_records,
+                'stats_by_type': stats,
+                'timestamp': datetime.now().isoformat()
+            }), 200
         
     except Exception as e:
+        import traceback
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': str(e),
+            'traceback': traceback.format_exc()
         }), 500
