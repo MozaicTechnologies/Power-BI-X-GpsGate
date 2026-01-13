@@ -496,13 +496,13 @@ def dashboard():
                 .then(data => {
                     const opId = data.operation_id || 'Unknown';
                     const duration = data.estimated_duration_minutes || '?';
-                    alert('✓ Backfill started!\n\nOperation ID: ' + opId + '\nEstimated time: ' + duration + ' minutes');
+                    alert('Backfill started!\n\nOperation ID: ' + opId + '\nEstimated time: ' + duration + ' minutes');
                     updateLogs('✓ Backfill started: ' + opId + ' (' + weeks + ' weeks)');
                     checkStatus();
                 })
                 .catch(e => {
-                    alert('❌ Error starting backfill: ' + e.message);
-                    updateLogs('❌ Backfill error: ' + e.message);
+                    alert('Error starting backfill: ' + e.message);
+                    updateLogs('✗ Backfill error: ' + e.message);
                 });
             }
             
@@ -515,12 +515,12 @@ def dashboard():
                 .then(data => {
                     const status = data.status || 'unknown';
                     const ops = data.active_backfill_operations !== undefined ? data.active_backfill_operations : 0;
-                    alert('✓ API Health\n\nStatus: ' + status + '\nActive operations: ' + ops);
+                    alert('API Health\n\nStatus: ' + status + '\nActive operations: ' + ops);
                     updateLogs('✓ Health check: ' + ops + ' active operations');
                 })
                 .catch(e => {
-                    alert('❌ Error checking status: ' + e.message);
-                    updateLogs('❌ Health check failed: ' + e.message);
+                    alert('Error checking status: ' + e.message);
+                    updateLogs('✗ Health check failed: ' + e.message);
                 });
             }
             
@@ -545,12 +545,12 @@ def dashboard():
                 })
                 .then(data => {
                     const display = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-                    alert('✓ ' + endpoint + '\n\nStatus: Success\n\nResponse:\n' + display.substring(0, 300));
+                    alert('API: ' + endpoint + '\n\nStatus: Success\n\nResponse:\n' + display.substring(0, 300));
                     updateLogs('✓ API call: ' + endpoint);
                 })
                 .catch(e => {
-                    alert('❌ Error calling ' + endpoint + ':\n' + e.message);
-                    updateLogs('❌ API error: ' + endpoint + ' - ' + e.message);
+                    alert('Error calling ' + endpoint + ':\n' + e.message);
+                    updateLogs('✗ API error: ' + endpoint + ' - ' + e.message);
                 });
             }
             
