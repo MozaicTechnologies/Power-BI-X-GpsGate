@@ -80,8 +80,8 @@ def render_endpoint(payload):
     Args:
         payload (dict): {
             "app_id": "6",
-            "period_start": "2025-01-01 00:00:00",
-            "period_end": "2025-01-07 23:59:59",
+            "period_start": Unix timestamp (int) or ISO string,
+            "period_end": Unix timestamp (int) or ISO string,
             "tag_id": "39",
             "report_id": "1225",
             "token": "v2:...",
@@ -96,6 +96,8 @@ def render_endpoint(payload):
         }
     """
     try:
+        from datetime import datetime
+        
         app_id = payload.get("app_id")
         token = payload.get("token")
         base_url = payload.get("base_url")
@@ -104,6 +106,12 @@ def render_endpoint(payload):
         event_id = payload.get("event_id")
         period_start = payload.get("period_start")
         period_end = payload.get("period_end")
+        
+        # Convert Unix timestamps to ISO datetime strings
+        if isinstance(period_start, (int, float)):
+            period_start = datetime.utcfromtimestamp(period_start).strftime("%Y-%m-%d %H:%M:%S")
+        if isinstance(period_end, (int, float)):
+            period_end = datetime.utcfromtimestamp(period_end).strftime("%Y-%m-%d %H:%M:%S")
         
         # Build GpsGate API URL
         url = f"{base_url}/comGpsGate/api/v.1/applications/{app_id}/reports/{report_id}/renderings"
@@ -169,6 +177,7 @@ def render_endpoint(payload):
             "status_code": 500,
             "data": {"error": str(e)}
         }
+
 
 
 def result_endpoint(payload):
