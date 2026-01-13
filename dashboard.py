@@ -3,7 +3,7 @@ Dashboard route for monitoring backfill operations and system status.
 Provides HTML dashboard with Quick Status, Recent Stats, Operation Logs, and API Reference.
 """
 
-from flask import Blueprint, render_template_string, jsonify, make_response
+from flask import Blueprint, render_template_string, jsonify, make_response, request
 from datetime import datetime
 import os
 
@@ -330,6 +330,12 @@ def dashboard():
                     <button class="btn-primary" onclick="startBackfill(54)">▶ Start Backfill (54 weeks)</button>
                     <button class="btn-secondary" onclick="startBackfill(1)">🔄 Manual Sync (1 week)</button>
                     <button class="btn-success" onclick="checkStatus()">📈 Check Status</button>
+                    
+                    <!-- API Endpoint Buttons -->
+                    <button class="btn-secondary" onclick="callEndpoint('/api/health', 'GET')" style="font-size:11px;">GET /api/health</button>
+                    <button class="btn-secondary" onclick="callEndpoint('/api/backfill', 'GET')" style="font-size:11px;">GET /api/backfill</button>
+                    <button class="btn-secondary" onclick="callEndpoint('/api/fetch-current', 'POST')" style="font-size:11px;">POST /api/fetch-current</button>
+                    <button class="btn-secondary" onclick="callEndpoint('/api/dashboard/stats', 'GET')" style="font-size:11px;">GET /api/dashboard/stats</button>
                 </div>
             </div>
             
@@ -344,11 +350,15 @@ def dashboard():
                     </div>
                     <div class="status-item">
                         <span class="status-label">Total Records:</span>
-                        <span class="status-value">0</span>
+                        <span class="status-value" id="totalRecords">0</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Active Operations:</span>
+                        <span class="status-value" id="activeOps">0</span>
                     </div>
                     <div class="status-item">
                         <span class="status-label">Last Updated:</span>
-                        <span class="status-value">19:12:23</span>
+                        <span class="status-value" id="lastUpdate">--:--:--</span>
                     </div>
                 </div>
                 
@@ -357,35 +367,43 @@ def dashboard():
                     <h3>📊 Recent Stats (8 Event Types)</h3>
                     <div class="event-type">
                         <span class="event-name">Trip Events:</span>
-                        <span class="event-status error">Error</span>
+                        <span class="event-status" id="trip-status">Error</span>
+                        <span class="event-records" id="trip-count">(0)</span>
                     </div>
                     <div class="event-type">
                         <span class="event-name">Speeding Events:</span>
-                        <span class="event-status error">Error</span>
+                        <span class="event-status" id="speeding-status">Error</span>
+                        <span class="event-records" id="speeding-count">(0)</span>
                     </div>
                     <div class="event-type">
                         <span class="event-name">Idle Events:</span>
-                        <span class="event-status error">Error</span>
+                        <span class="event-status" id="idle-status">Error</span>
+                        <span class="event-records" id="idle-count">(0)</span>
                     </div>
                     <div class="event-type">
                         <span class="event-name">AWH Events:</span>
-                        <span class="event-status error">Error</span>
+                        <span class="event-status" id="awh-status">Error</span>
+                        <span class="event-records" id="awh-count">(0)</span>
                     </div>
                     <div class="event-type">
                         <span class="event-name">WH Events:</span>
-                        <span class="event-status error">Error</span>
+                        <span class="event-status" id="wh-status">Error</span>
+                        <span class="event-records" id="wh-count">(0)</span>
                     </div>
                     <div class="event-type">
                         <span class="event-name">HA Events:</span>
-                        <span class="event-status error">Error</span>
+                        <span class="event-status" id="ha-status">Error</span>
+                        <span class="event-records" id="ha-count">(0)</span>
                     </div>
                     <div class="event-type">
                         <span class="event-name">HB Events:</span>
-                        <span class="event-status error">Error</span>
+                        <span class="event-status" id="hb-status">Error</span>
+                        <span class="event-records" id="hb-count">(0)</span>
                     </div>
                     <div class="event-type">
                         <span class="event-name">WU Events:</span>
-                        <span class="event-status error">Error</span>
+                        <span class="event-status" id="wu-status">Error</span>
+                        <span class="event-records" id="wu-count">(0)</span>
                     </div>
                 </div>
                 
@@ -483,9 +501,25 @@ def dashboard():
                 fetch('/api/health')
                 .then(r => r.json())
                 .then(data => {
-                    alert('✓ API Status\\n\\nStatus: ' + data.status + '\\nActive operations: ' + data.active_backfill_operations);
+                    const status = data.status || 'unknown';
+                    const ops = data.active_backfill_operations || 0;
+                    alert('✓ API Status\n\nStatus: ' + status + '\nActive operations: ' + ops);
                 })
-                .catch(e => alert('Error: ' + e));
+                .catch(e => alert('❌ Error: ' + e.message));
+            }
+            
+            function callEndpoint(endpoint, method = 'GET') {
+                const options = {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' }
+                };
+                
+                fetch(endpoint, options)
+                .then(r => r.json())
+                .then(data => {
+                    alert('✓ ' + endpoint + '\n\nResponse:\n' + JSON.stringify(data, null, 2).substring(0, 200));
+                })
+                .catch(e => alert('❌ Error calling ' + endpoint + ':\n' + e.message));
             }
             
             function runMigration() {
@@ -522,6 +556,8 @@ def dashboard():
                 fetch('/api/dashboard/stats')
                     .then(r => r.json())
                     .then(data => {
+                        console.log('Stats data:', data);
+                        
                         // Update status badge
                         const badge = document.getElementById('statusBadge');
                         if (data.active_operations > 0) {
@@ -532,18 +568,63 @@ def dashboard():
                             badge.className = 'status-badge idle';
                         }
                         
-                        // Update logs
+                        // Update Quick Status card
+                        const totalEl = document.getElementById('totalRecords');
+                        const activeEl = document.getElementById('activeOps');
+                        const updateEl = document.getElementById('lastUpdate');
+                        
+                        if (totalEl) totalEl.textContent = data.total_records || 0;
+                        if (activeEl) activeEl.textContent = data.active_operations || 0;
+                        if (updateEl) updateEl.textContent = new Date().toLocaleTimeString();
+                        
+                        // Update event types in Recent Stats card
+                        if (data.event_types) {
+                            const eventMap = {
+                                'Trip': { status: 'trip-status', count: 'trip-count' },
+                                'Speeding': { status: 'speeding-status', count: 'speeding-count' },
+                                'Idle': { status: 'idle-status', count: 'idle-count' },
+                                'AWH': { status: 'awh-status', count: 'awh-count' },
+                                'WH': { status: 'wh-status', count: 'wh-count' },
+                                'HA': { status: 'ha-status', count: 'ha-count' },
+                                'HB': { status: 'hb-status', count: 'hb-count' },
+                                'WU': { status: 'wu-status', count: 'wu-count' }
+                            };
+                            
+                            Object.entries(data.event_types).forEach(([type, info]) => {
+                                const map = eventMap[type];
+                                if (map) {
+                                    const statusEl = document.getElementById(map.status);
+                                    const countEl = document.getElementById(map.count);
+                                    
+                                    if (statusEl) {
+                                        statusEl.textContent = info.status === 'success' ? '✓ Success' : 'Error';
+                                        statusEl.className = 'event-status ' + info.status;
+                                    }
+                                    if (countEl) {
+                                        countEl.textContent = '(' + (info.records || 0) + ')';
+                                    }
+                                }
+                            });
+                        }
+                    })
+                    .catch(e => console.log('Stats refresh failed'));
+                    
+                // Get and update logs
+                fetch('/api/dashboard/logs')
+                    .then(r => r.json())
+                    .then(data => {
                         const logsContainer = document.getElementById('logsContainer');
-                        if (data.recent_logs && data.recent_logs.length > 0) {
-                            logsContainer.innerHTML = data.recent_logs.map(log => {
+                        if (data.logs && data.logs.length > 0) {
+                            logsContainer.innerHTML = data.logs.map(log => {
                                 let levelClass = 'log-info';
                                 if (log.level === 'error') levelClass = 'log-error';
                                 if (log.level === 'warning') levelClass = 'log-warning';
                                 return `<div class="log-entry"><span class="log-timestamp">${log.timestamp}</span> <span class="${levelClass}">➜</span> ${log.message}</div>`;
                             }).join('');
+                            logsContainer.scrollTop = logsContainer.scrollHeight;
                         }
                     })
-                    .catch(e => console.log('Stats refresh failed'));
+                    .catch(e => console.log('Logs refresh failed'));
             }, 2000);
             
             function updateLogs(message) {
@@ -571,31 +652,77 @@ def dashboard():
     response.headers['Expires'] = '0'
     return response
 
+@dashboard_bp.route('/dashboard/logs', methods=['GET'])
+def get_logs():
+    """Get recent operation logs"""
+    return jsonify({
+        "logs": recent_logs[-30:] if recent_logs else [],
+        "timestamp": datetime.now().isoformat()
+    })
+
+@dashboard_bp.route('/dashboard/add-log', methods=['POST'])
+def add_operation_log():
+    """Add a log entry (called from backfill processes)"""
+    try:
+        data = request.get_json() or {}
+        message = data.get('message', '')
+        level = data.get('level', 'info')
+        add_log(message, level)
+        return jsonify({"status": "logged"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 @dashboard_bp.route('/dashboard/stats', methods=['GET'])
 def dashboard_stats():
     """API endpoint returning dashboard statistics as JSON"""
     from api import backfill_operations
+    from models import db, FactTrip, FactSpeeding, FactIdle, FactAwh, FactWh, FactHa, FactHb, FactWu
     
-    # Count active operations
-    active_ops = sum(1 for op in backfill_operations.values() if op.get('status') == 'running')
-    
-    return jsonify({
-        "service_status": "online",
-        "total_records": 0,
-        "active_operations": active_ops,
-        "recent_logs": recent_logs[-20:],  # Last 20 logs for real-time display
-        "event_types": {
-            "Trip": {"status": "error", "records": 0},
-            "Speeding": {"status": "error", "records": 0},
-            "Idle": {"status": "error", "records": 0},
-            "AWH": {"status": "error", "records": 0},
-            "WH": {"status": "error", "records": 0},
-            "HA": {"status": "error", "records": 0},
-            "HB": {"status": "error", "records": 0},
-            "WU": {"status": "error", "records": 0}
-        },
-        "timestamp": datetime.now().isoformat()
-    })
+    try:
+        # Count active operations
+        active_ops = sum(1 for op in backfill_operations.values() if op.get('status') == 'running')
+        
+        # Count total records from database
+        try:
+            trip_count = db.session.query(FactTrip).count()
+            speeding_count = db.session.query(FactSpeeding).count()
+            idle_count = db.session.query(FactIdle).count()
+            awh_count = db.session.query(FactAwh).count()
+            wh_count = db.session.query(FactWh).count()
+            ha_count = db.session.query(FactHa).count()
+            hb_count = db.session.query(FactHb).count()
+            wu_count = db.session.query(FactWu).count()
+            
+            total_records = trip_count + speeding_count + idle_count + awh_count + wh_count + ha_count + hb_count + wu_count
+        except Exception as e:
+            total_records = 0
+            trip_count = speeding_count = idle_count = awh_count = wh_count = ha_count = hb_count = wu_count = 0
+        
+        return jsonify({
+            "service_status": "online",
+            "total_records": total_records,
+            "active_operations": active_ops,
+            "recent_logs": recent_logs[-20:],
+            "event_types": {
+                "Trip": {"status": "success" if trip_count > 0 else "error", "records": trip_count},
+                "Speeding": {"status": "success" if speeding_count > 0 else "error", "records": speeding_count},
+                "Idle": {"status": "success" if idle_count > 0 else "error", "records": idle_count},
+                "AWH": {"status": "success" if awh_count > 0 else "error", "records": awh_count},
+                "WH": {"status": "success" if wh_count > 0 else "error", "records": wh_count},
+                "HA": {"status": "success" if ha_count > 0 else "error", "records": ha_count},
+                "HB": {"status": "success" if hb_count > 0 else "error", "records": hb_count},
+                "WU": {"status": "success" if wu_count > 0 else "error", "records": wu_count}
+            },
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({
+            "service_status": "error",
+            "error": str(e),
+            "active_operations": 0,
+            "total_records": 0,
+            "recent_logs": recent_logs[-20:]
+        }), 500
 
 @dashboard_bp.route('/dashboard/migrate', methods=['POST'])
 def run_migration():
