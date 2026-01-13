@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 import requests
 from urllib.parse import urljoin
+import json
 
 api_bp = Blueprint('api_bp', __name__)
 
@@ -155,9 +156,15 @@ def render_endpoint(payload):
         resp = requests.post(url, json=body, headers=headers, timeout=(10, 30))
         
         if resp.status_code != 200:
+            import sys
+            error_body = resp.json() if resp.headers.get('Content-Type', '').lower().find('json') >= 0 else resp.text
+            print(f"[DEBUG] render_endpoint URL: {url}", file=sys.stderr)
+            print(f"[DEBUG] render_endpoint Request Body: {json.dumps(body, indent=2)}", file=sys.stderr)
+            print(f"[DEBUG] render_endpoint Response Status: {resp.status_code}", file=sys.stderr)
+            print(f"[DEBUG] render_endpoint Response Body: {error_body}", file=sys.stderr)
             return {
                 "status_code": resp.status_code,
-                "data": resp.json() if resp.headers.get('Content-Type', '').lower().find('json') >= 0 else {"error": resp.text}
+                "data": error_body
             }
         
         response_data = resp.json()
