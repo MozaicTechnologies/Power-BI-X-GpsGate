@@ -194,9 +194,3 @@ def backfill_status():
             'error': str(e),
             'traceback': traceback.format_exc()
         }), 500
-
-@backfill_api.route('/dashboard', methods=['GET'])
-def dashboard():
-    """Redirect to new dashboard in dashboard.py"""
-    from flask import redirect
-    return redirect('/api/dashboard')
