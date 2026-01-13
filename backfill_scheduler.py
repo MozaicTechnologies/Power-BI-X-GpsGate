@@ -18,6 +18,40 @@ def health():
         'timestamp': datetime.now().isoformat()
     })
 
+@backfill_api.route('/init-db', methods=['GET', 'POST'])
+def init_db():
+    """Initialize database schema - run migrations and create tables"""
+    try:
+        from application import db, create_app
+        from flask_migrate import upgrade
+        
+        app = create_app()
+        with app.app_context():
+            # Run migrations
+            try:
+                upgrade()
+                migration_status = "Migrations completed successfully"
+            except Exception as mig_err:
+                migration_status = f"Migration warning: {str(mig_err)}"
+            
+            # Create all tables if not exist
+            db.create_all()
+            
+            return jsonify({
+                'success': True,
+                'message': 'Database initialized',
+                'migration_status': migration_status,
+                'timestamp': datetime.now().isoformat()
+            }), 200
+            
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @backfill_api.route('/backfill/current-week', methods=['POST', 'GET'])
 def backfill_current_week():
     """

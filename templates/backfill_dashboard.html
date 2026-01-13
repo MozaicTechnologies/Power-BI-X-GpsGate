@@ -247,6 +247,9 @@
             <p>Manage and monitor daily data synchronization</p>
             
             <div class="controls">
+                <button class="btn-primary" onclick="initDatabase()" id="initBtn">
+                    🗄️ Initialize DB
+                </button>
                 <button class="btn-primary" onclick="triggerBackfill()" id="syncBtn">
                     ▶️ Manual Sync Now
                 </button>
@@ -309,6 +312,48 @@
     
     <script>
         let isWorking = false;
+        
+        async function initDatabase() {
+            if (isWorking) return;
+            isWorking = true;
+            
+            const btn = document.getElementById('initBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Initializing...';
+            
+            addLog('🗄️ Initializing database schema...');
+            
+            try {
+                const response = await fetch('/api/init-db', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showAlert('✅ Database schema initialized successfully!', 'success');
+                    addLog('✓ Database initialization completed');
+                    addLog(`✓ Message: ${data.message}`);
+                    addLog(`✓ Migration status: ${data.migration_status}`);
+                    
+                    setTimeout(() => {
+                        addLog('⏳ Checking database status...');
+                        checkStatus();
+                    }, 1000);
+                } else {
+                    showAlert(`❌ Initialization failed: ${data.error}`, 'error');
+                    addLog(`✗ Error: ${data.error}`);
+                }
+            } catch (error) {
+                showAlert(`❌ Error: ${error.message}`, 'error');
+                addLog(`✗ Exception: ${error.message}`);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '🗄️ Initialize DB';
+                isWorking = false;
+            }
+        }
         
         async function triggerBackfill() {
             if (isWorking) return;
