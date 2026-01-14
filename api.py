@@ -174,7 +174,7 @@ def fetch_current_data():
         
         def run_current_fetch():
             try:
-                print(f"\n{'='*80}")
+                print(f"\n{'='*80}", flush=True)
                 print(f"[FETCH-CURRENT] Starting operation {operation_id}", flush=True)
                 print(f"{'='*80}", flush=True)
                 
@@ -199,29 +199,59 @@ def fetch_current_data():
                 env['FETCH_CURRENT_WEEK'] = 'true'
                 print(f"[FETCH-CURRENT] Environment FETCH_CURRENT_WEEK=true", flush=True)
                 
+                # Create log file for subprocess output
+                log_file_path = os.path.join(os.path.dirname(__file__), f'backfill_log_{operation_id}.txt')
+                print(f"[FETCH-CURRENT] Log file: {log_file_path}", flush=True)
+                
                 print(f"[FETCH-CURRENT] Starting subprocess.run()...", flush=True)
-                result = subprocess.run(
-                    ['python', script_path],
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                    timeout=1800  # 30 min timeout for current week
-                )
+                try:
+                    with open(log_file_path, 'w') as log_file:
+                        result = subprocess.run(
+                            ['python', script_path],
+                            env=env,
+                            stdout=log_file,
+                            stderr=subprocess.STDOUT,  # Redirect stderr to stdout
+                            text=True,
+                            timeout=1800  # 30 min timeout for current week
+                        )
+                except Exception as e:
+                    result = subprocess.run(
+                        ['python', script_path],
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        timeout=1800  # 30 min timeout for current week
+                    )
+                    with open(log_file_path, 'w') as log_file:
+                        log_file.write(f"Note: Failed to write to log file, using capture_output instead\n")
+                        log_file.write(result.stdout)
+                        if result.stderr:
+                            log_file.write(f"\n--- STDERR ---\n{result.stderr}")
+                
+                # Read the log file content
+                try:
+                    with open(log_file_path, 'r') as log_file:
+                        log_content = log_file.read()
+                except:
+                    log_content = result.stdout if 'result' in locals() else "Could not read log file"
                 
                 print(f"[FETCH-CURRENT] Script completed with return code: {result.returncode}", flush=True)
-                print(f"[FETCH-CURRENT] STDOUT length: {len(result.stdout)} chars", flush=True)
-                print(f"[FETCH-CURRENT] STDERR length: {len(result.stderr)} chars", flush=True)
+                print(f"[FETCH-CURRENT] Log file size: {len(log_content)} bytes", flush=True)
                 
                 backfill_operations[operation_id]['status'] = 'completed'
                 backfill_operations[operation_id]['end_time'] = datetime.now()
-                backfill_operations[operation_id]['output'] = result.stdout
+                backfill_operations[operation_id]['output'] = log_content
+                backfill_operations[operation_id]['log_file'] = log_file_path
                 
                 if result.returncode != 0:
                     backfill_operations[operation_id]['status'] = 'error'
-                    backfill_operations[operation_id]['error'] = result.stderr
-                    print(f"[FETCH-CURRENT] ❌ Error output:\n{result.stderr[:1000]}", flush=True)
+                    backfill_operations[operation_id]['error'] = log_content[:1000] if log_content else "Unknown error"
+                    print(f"[FETCH-CURRENT] ❌ Error (return code {result.returncode}):\n{log_content[:1000]}", flush=True)
                 else:
-                    print(f"[FETCH-CURRENT] ✓ Success! Output (first 1000 chars):\n{result.stdout[:1000]}", flush=True)
+                    print(f"[FETCH-CURRENT] ✓ Success!", flush=True)
+                    print(f"[FETCH-CURRENT] Output length: {len(log_content)} bytes", flush=True)
+                    if log_content:
+                        print(f"[FETCH-CURRENT] First 500 chars:\n{log_content[:500]}", flush=True)
                     
                 print(f"{'='*80}", flush=True)
                 print(f"[FETCH-CURRENT] Operation {operation_id} completed", flush=True)
