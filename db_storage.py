@@ -297,8 +297,10 @@ def store_event_data_to_db(df, app_id, tag_id, event_name):
         }
     """
     
-    # Use raw SQL storage for non-Trip events on LIVE database
-    if USE_LIVE_DATABASE and event_name != "Trip":
+    # Use raw SQL storage for ALL events on LIVE database (ORM models may have schema mismatch)
+    if USE_LIVE_DATABASE:
+        import sys
+        print(f"[DB_STORAGE] Using db_storage_live.py for {event_name} (LIVE database with raw SQL)", file=sys.stderr)
         from db_storage_live import store_to_live_db
         return store_to_live_db(df, app_id, tag_id, event_name, db)
     
