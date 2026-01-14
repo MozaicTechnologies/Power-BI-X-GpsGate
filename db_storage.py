@@ -369,8 +369,6 @@ def store_event_data_to_db(df, app_id, tag_id, event_name):
                 
                 # Fallback: Skip this row if we can't get event_date
                 if event_date is None:
-                    if event_name == "Trip" and skipped < 3:
-                        print(f"[DEBUG SKIP] {event_name} row {idx}: Missing event_date. Has Start Date={row.get('Start Date')}, Event Date={row.get('Event Date')}", file=sys.stderr)
                     skipped += 1
                     continue
                 
@@ -495,10 +493,6 @@ def store_event_data_to_db(df, app_id, tag_id, event_name):
                 except IntegrityError as ie:
                     # Duplicate detected OR other integrity issue - update existing record to flag it
                     db.session.rollback()
-                    
-                    # Log the actual error if it's Trip
-                    if event_name == "Trip" and skipped < 3:
-                        print(f"[DEBUG INT ERR] {event_name} row {idx}: {str(ie)[:120]}", file=sys.stderr)
                     
                     # Build WHERE clause for the duplicate record
                     config = EVENT_MODELS[event_name]

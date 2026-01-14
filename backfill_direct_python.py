@@ -22,7 +22,11 @@ app = create_app()
 FETCH_CURRENT_WEEK = os.environ.get('FETCH_CURRENT_WEEK', 'false').lower() == 'true'
 
 # Build weekly schedule
-def build_weekly_schedule(current_week_only=False):
+def build_weekly_schedule(current_week_only=None):
+    # Check environment variable if parameter not explicitly provided
+    if current_week_only is None:
+        current_week_only = os.environ.get('FETCH_CURRENT_WEEK', 'false').lower() == 'true'
+    
     if current_week_only:
         # Calculate current week (today's date determines which week)
         today = datetime.now()
@@ -70,10 +74,8 @@ def build_weekly_schedule(current_week_only=False):
         
         return weeks
 
-weeks = build_weekly_schedule(current_week_only=FETCH_CURRENT_WEEK)[:1]  # Only first week
-week = weeks[0]
-
-print(f"Processing Week 1: {week['start_date']} too {week['end_date']}\n")
+weeks = build_weekly_schedule(current_week_only=FETCH_CURRENT_WEEK)
+print(f"Processing {len(weeks)} week(s)\n")
 
 # Endpoints configuration
 ENDPOINTS = [
@@ -122,20 +124,28 @@ total_db_dupes = 0
 # Track accounting per endpoint
 endpoint_accounting = []
 
-# Process each endpoint
+# Process each of 8 endpoints (each internally processes multiple weeks)
 for i, (name, event_type, response_key) in enumerate(ENDPOINTS, 1):
     print(f"[{i}/8] {name}")
     print("-" * 80)
     
-    payload = trip_payload if event_type == "Trip" else payload_template.copy()
+    # Select appropriate payload (Trip uses different report_id)
+    if event_type == "Trip":
+        payload = trip_payload.copy()
+    else:
+        payload = payload_template.copy()
     
-    # Convert timestamps to ISO format for render table matching
-    from datetime import datetime
-    period_start_iso = datetime.utcfromtimestamp(week['week_start']).strftime('%Y-%m-%dT%H:%M:%SZ')
-    period_end_iso = datetime.utcfromtimestamp(week['week_end']).strftime('%Y-%m-%dT%H:%M:%SZ')
-    
-    payload["period_start"] = period_start_iso
-    payload["period_end"] = period_end_iso
+    # Build date range for this backfill
+    if weeks:
+        first_week = weeks[0]
+        last_week = weeks[-1]
+        
+        from datetime import datetime, timezone
+        period_start_iso = datetime.fromtimestamp(first_week['week_start'], timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        period_end_iso = datetime.fromtimestamp(last_week['week_end'], timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        
+        payload["period_start"] = period_start_iso
+        payload["period_end"] = period_end_iso
     
     # Add event_id if needed
     if event_ids[event_type]:
@@ -168,12 +178,12 @@ for i, (name, event_type, response_key) in enumerate(ENDPOINTS, 1):
         total_db_inserted = accounting.get('total_inserted', 0)
         
         print(f"  Status: OK (HTTP 200)")
-        print(f"  Fetched (raw): {raw_fetched}")
-        print(f"  Internal Dupes Removed: {internal_dupes}")
-        print(f"  After Dedup: {rows_after_dedup}")
-        print(f"  DB-Level Dupes Flagged: {db_dupes_flagged}")
-        print(f"  DB Failed: {db_failed}")
-        print(f"  Total Inserted: {total_db_inserted}")
+        print(f"  Fetched (raw): {raw_fetched:,}")
+        print(f"  Internal Dupes Removed: {internal_dupes:,}")
+        print(f"  After Dedup: {rows_after_dedup:,}")
+        print(f"  DB-Level Dupes Flagged: {db_dupes_flagged:,}")
+        print(f"  DB Failed: {db_failed:,}")
+        print(f"  Total Inserted: {total_db_inserted:,}")
         
         total_rows += rows
         total_inserted += db_stats.get('inserted', 0)

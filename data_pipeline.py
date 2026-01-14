@@ -1,4 +1,4 @@
-ï»¿"""
+"""
 Data Pipeline for Fleet Dashboard
 Handles: reports, event rules, weekly rendering, CSV download & cleaning
 """
@@ -228,7 +228,7 @@ def process_event_data(event_name, response_key):
                     "report_id": report_id
                 }
                 
-                # Î“Ã«Ã­â•žÃ†â”œâ•¢â”œÃ¥ CRITICAL FIX: Trip MUST NOT send event_id
+                # Gëí¦Æ+¦+å CRITICAL FIX: Trip MUST NOT send event_id
                 if not is_trip:
                     render_payload["event_id"] = event_id
 
@@ -306,7 +306,7 @@ def process_event_data(event_name, response_key):
                 if df is not None and not df.empty:
                     df_original = len(df)
                     total_rows_raw += df_original
-                    import sys; print(f"[SPEEDING] Week {i+1}: {df_original} rows fetched (raw)", file=sys.stderr)
+                    import sys; print(f"[{event_name}] Week {i+1}: {df_original} rows fetched (raw)", file=sys.stderr)
                     
                     # DEDUPLICATE based on ALL columns (complete row duplicate)
                     # This removes rows where every column value is identical
@@ -315,15 +315,15 @@ def process_event_data(event_name, response_key):
                     internal_dupes = df_original - df_after_dedup
                     total_internal_dupes += internal_dupes
                     if internal_dupes > 0:
-                        print(f"[SPEEDING] Week {i+1}: {df_original} -> {df_after_dedup} after removing {internal_dupes} complete row duplicates (all columns identical)", file=sys.stderr)
+                        print(f"[{event_name}] Week {i+1}: {df_original} -> {df_after_dedup} after removing {internal_dupes} complete row duplicates (all columns identical)", file=sys.stderr)
                     else:
-                        print(f"[SPEEDING] Week {i+1}: {df_after_dedup} rows (clean, no duplicates)", file=sys.stderr)
+                        print(f"[{event_name}] Week {i+1}: {df_after_dedup} rows (clean, no duplicates)", file=sys.stderr)
                     
                     all_dataframes.append(df)
                     
-                    # Î“Â£Ã´ Store data to database with incremental logic
+                    # G£ô Store data to database with incremental logic
                     db_stats = store_event_data_to_db(df, app_id, tag_id, event_name)
-                    import sys; print(f"[SPEEDING] Week {i+1}: DB insert stats - Inserted: {db_stats.get('inserted')}, DB-level duplicates: {db_stats.get('skipped')}, Errors: {db_stats.get('failed')}", file=sys.stderr)
+                    import sys; print(f"[{event_name}] Week {i+1}: DB insert stats - Inserted: {db_stats.get('inserted')}, DB-level duplicates: {db_stats.get('skipped')}, Errors: {db_stats.get('failed')}", file=sys.stderr)
                     total_db_stats["inserted"] += db_stats.get("inserted", 0)
                     total_db_stats["skipped"] += db_stats.get("skipped", 0)
                     total_db_stats["failed"] += db_stats.get("failed", 0)
@@ -514,3 +514,5 @@ def hb():
 @pipeline_bp.route("/wu-data", methods=["POST"])
 def wu():
     return process_event_data("WU", "wu_events")
+
+
