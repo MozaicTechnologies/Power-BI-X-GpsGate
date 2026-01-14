@@ -722,26 +722,37 @@ def dashboard_stats():
         active_ops = sum(1 for op in backfill_operations.values() if op.get('status') == 'running')
         
         # Count total records from database using RAW SQL (avoid ORM schema mismatches)
+        trip_count = speeding_count = idle_count = awh_count = wh_count = ha_count = hb_count = wu_count = 0
+        total_records = 0
+        
+        # Helper function to safely count a table
+        def count_table(table_name):
+            try:
+                result = db.session.query(text(f"SELECT COUNT(*) FROM {table_name}")).scalar()
+                return result or 0
+            except Exception as table_err:
+                print(f"[DASHBOARD] Table {table_name} error: {type(table_err).__name__}: {str(table_err)[:100]}", file=sys.stderr)
+                return 0
+        
         try:
             # Use raw SQL COUNT queries to avoid ORM model column mismatch issues
             # The live database may have different columns than the ORM models define
-            
-            trip_count = db.session.query(text("SELECT COUNT(*) FROM fact_trip")).scalar() or 0
-            speeding_count = db.session.query(text("SELECT COUNT(*) FROM fact_speeding")).scalar() or 0
-            idle_count = db.session.query(text("SELECT COUNT(*) FROM fact_idle")).scalar() or 0
-            awh_count = db.session.query(text("SELECT COUNT(*) FROM fact_awh")).scalar() or 0
-            wh_count = db.session.query(text("SELECT COUNT(*) FROM fact_wh")).scalar() or 0
-            ha_count = db.session.query(text("SELECT COUNT(*) FROM fact_ha")).scalar() or 0
-            hb_count = db.session.query(text("SELECT COUNT(*) FROM fact_hb")).scalar() or 0
-            wu_count = db.session.query(text("SELECT COUNT(*) FROM fact_wu")).scalar() or 0
+            trip_count = count_table("fact_trip")
+            speeding_count = count_table("fact_speeding")
+            idle_count = count_table("fact_idle")
+            awh_count = count_table("fact_awh")
+            wh_count = count_table("fact_wh")
+            ha_count = count_table("fact_ha")
+            hb_count = count_table("fact_hb")
+            wu_count = count_table("fact_wu")
             
             total_records = trip_count + speeding_count + idle_count + awh_count + wh_count + ha_count + hb_count + wu_count
             
             print(f"[DASHBOARD] Counts - Trip: {trip_count}, Speeding: {speeding_count}, Idle: {idle_count}, AWH: {awh_count}, WH: {wh_count}, HA: {ha_count}, HB: {hb_count}, WU: {wu_count}, Total: {total_records}", file=sys.stderr)
         except Exception as e:
-            print(f"[DASHBOARD ERROR] Database query failed: {type(e).__name__}: {str(e)[:200]}", file=sys.stderr)
-            total_records = 0
-            trip_count = speeding_count = idle_count = awh_count = wh_count = ha_count = hb_count = wu_count = 0
+            print(f"[DASHBOARD ERROR] Overall query failed: {type(e).__name__}: {str(e)}", file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
         
         return jsonify({
             "service_status": "online",
