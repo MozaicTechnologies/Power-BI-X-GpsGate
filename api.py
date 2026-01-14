@@ -174,17 +174,21 @@ def fetch_current_data():
         
         def run_current_fetch():
             try:
+                print(f"[FETCH-CURRENT] Starting operation {operation_id}", flush=True)
                 backfill_operations[operation_id] = {
                     'status': 'running',
                     'start_time': datetime.now(),
                     'weeks': 1,
                     'type': 'current_week'
                 }
+                print(f"[FETCH-CURRENT] Operation status set to running", flush=True)
+                print(f"[FETCH-CURRENT] Total backfill_operations: {len(backfill_operations)}", flush=True)
                 
                 script_path = os.path.join(
                     os.path.dirname(__file__),
                     'backfill_direct_python.py'
                 )
+                print(f"[FETCH-CURRENT] Running script: {script_path}", flush=True)
                 
                 # Set environment variable to fetch current week
                 env = os.environ.copy()
@@ -198,6 +202,7 @@ def fetch_current_data():
                     timeout=1800  # 30 min timeout for current week
                 )
                 
+                print(f"[FETCH-CURRENT] Script completed with return code: {result.returncode}", flush=True)
                 backfill_operations[operation_id]['status'] = 'completed'
                 backfill_operations[operation_id]['end_time'] = datetime.now()
                 backfill_operations[operation_id]['output'] = result.stdout
@@ -205,13 +210,19 @@ def fetch_current_data():
                 if result.returncode != 0:
                     backfill_operations[operation_id]['status'] = 'error'
                     backfill_operations[operation_id]['error'] = result.stderr
+                    print(f"[FETCH-CURRENT] Error output: {result.stderr[:500]}", flush=True)
+                else:
+                    print(f"[FETCH-CURRENT] Success output: {result.stdout[:500]}", flush=True)
                     
             except Exception as e:
                 backfill_operations[operation_id]['status'] = 'error'
                 backfill_operations[operation_id]['error'] = str(e)
+                print(f"[FETCH-CURRENT] Exception: {type(e).__name__}: {str(e)}", flush=True)
         
+        print(f"[FETCH-CURRENT] Creating daemon thread for operation {operation_id}", flush=True)
         thread = threading.Thread(target=run_current_fetch, daemon=True)
         thread.start()
+        print(f"[FETCH-CURRENT] Thread started, responding with 202", flush=True)
         
         return jsonify({
             "status": "started",
