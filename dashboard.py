@@ -708,9 +708,9 @@ def add_operation_log():
 def dashboard_stats():
     """API endpoint returning dashboard statistics as JSON"""
     from api import backfill_operations
-    from models import db, FactTrip, FactSpeeding, FactIdle, FactAWH, FactWH, FactHA, FactHB, FactWU
     import os
     import sys
+    from sqlalchemy import text
     
     try:
         # Debug: Print database connection info
@@ -721,22 +721,25 @@ def dashboard_stats():
         # Count active operations
         active_ops = sum(1 for op in backfill_operations.values() if op.get('status') == 'running')
         
-        # Count total records from database
+        # Count total records from database using RAW SQL (avoid ORM schema mismatches)
         try:
-            trip_count = db.session.query(FactTrip).count()
-            speeding_count = db.session.query(FactSpeeding).count()
-            idle_count = db.session.query(FactIdle).count()
-            awh_count = db.session.query(FactAWH).count()
-            wh_count = db.session.query(FactWH).count()
-            ha_count = db.session.query(FactHA).count()
-            hb_count = db.session.query(FactHB).count()
-            wu_count = db.session.query(FactWU).count()
+            # Use raw SQL COUNT queries to avoid ORM model column mismatch issues
+            # The live database may have different columns than the ORM models define
+            
+            trip_count = db.session.query(text("SELECT COUNT(*) FROM fact_trip")).scalar() or 0
+            speeding_count = db.session.query(text("SELECT COUNT(*) FROM fact_speeding")).scalar() or 0
+            idle_count = db.session.query(text("SELECT COUNT(*) FROM fact_idle")).scalar() or 0
+            awh_count = db.session.query(text("SELECT COUNT(*) FROM fact_awh")).scalar() or 0
+            wh_count = db.session.query(text("SELECT COUNT(*) FROM fact_wh")).scalar() or 0
+            ha_count = db.session.query(text("SELECT COUNT(*) FROM fact_ha")).scalar() or 0
+            hb_count = db.session.query(text("SELECT COUNT(*) FROM fact_hb")).scalar() or 0
+            wu_count = db.session.query(text("SELECT COUNT(*) FROM fact_wu")).scalar() or 0
             
             total_records = trip_count + speeding_count + idle_count + awh_count + wh_count + ha_count + hb_count + wu_count
             
             print(f"[DASHBOARD] Counts - Trip: {trip_count}, Speeding: {speeding_count}, Idle: {idle_count}, AWH: {awh_count}, WH: {wh_count}, HA: {ha_count}, HB: {hb_count}, WU: {wu_count}, Total: {total_records}", file=sys.stderr)
         except Exception as e:
-            print(f"[DASHBOARD ERROR] Database query failed: {type(e).__name__}: {str(e)}", file=sys.stderr)
+            print(f"[DASHBOARD ERROR] Database query failed: {type(e).__name__}: {str(e)[:200]}", file=sys.stderr)
             total_records = 0
             trip_count = speeding_count = idle_count = awh_count = wh_count = ha_count = hb_count = wu_count = 0
         
