@@ -729,7 +729,8 @@ def dashboard_stats():
         # Helper function to safely count a table
         def count_table(table_name):
             try:
-                result = db.session.query(text(f"SELECT COUNT(*) FROM {table_name}")).scalar()
+                # Use execute() not query() to avoid double SELECT wrapping
+                result = db.session.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar()
                 return result or 0
             except Exception as table_err:
                 print(f"[DASHBOARD] Table {table_name} error: {type(table_err).__name__}: {str(table_err)[:100]}", file=sys.stderr)

@@ -4,22 +4,34 @@ Direct backfill - call process_event_data function directly
 """
 import os
 import sys
+
+print("[BACKFILL] Script started", flush=True)
+print(f"[BACKFILL] Python version: {sys.version}", flush=True)
+print(f"[BACKFILL] Python executable: {sys.executable}", flush=True)
+
 from dotenv import load_dotenv
 
 # Load .env first
+print("[BACKFILL] Loading .env file...", flush=True)
 load_dotenv()
+print("[BACKFILL] .env loaded", flush=True)
 
 # Use local DATABASE_URL (not live) - Remove the override that was forcing live database
+print("[BACKFILL] Creating Flask app...", flush=True)
 from application import create_app
 from data_pipeline import process_event_data
 from datetime import datetime, timedelta
 from flask import request
 import json
 
+print("[BACKFILL] Imports successful", flush=True)
+
 app = create_app()
+print("[BACKFILL] Flask app created", flush=True)
 
 # Check if fetching current week or historical
 FETCH_CURRENT_WEEK = os.environ.get('FETCH_CURRENT_WEEK', 'false').lower() == 'true'
+print(f"[BACKFILL] FETCH_CURRENT_WEEK={FETCH_CURRENT_WEEK}", flush=True)
 
 # Build weekly schedule
 def build_weekly_schedule(current_week_only=None):
@@ -124,6 +136,8 @@ total_db_dupes = 0
 # Track accounting per endpoint
 endpoint_accounting = []
 
+print("[BACKFILL] Starting main backfill loop...", flush=True)
+
 # Process each of 8 endpoints (each internally processes multiple weeks)
 for i, (name, event_type, response_key) in enumerate(ENDPOINTS, 1):
     print(f"[{i}/8] {name}")
@@ -219,3 +233,6 @@ print("=" * 80)
 for acct in endpoint_accounting:
     print(f"{acct['endpoint']:12} | Raw: {acct['raw_fetched']:>6} | Internal Dupes: {acct['internal_dupes']:>6} | After Dedup: {acct['after_dedup']:>6} | DB Dupes: {acct['db_dupes']:>6} | Inserted: {acct['inserted']:>6}")
 print("=" * 80)
+print("[BACKFILL] Script completed successfully!", flush=True)
+sys.exit(0)
+
