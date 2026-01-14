@@ -300,9 +300,9 @@ def store_event_data_to_db(df, app_id, tag_id, event_name):
     # Use raw SQL storage for ALL events on LIVE database (ORM models may have schema mismatch)
     if USE_LIVE_DATABASE:
         import sys
-        print(f"[DB_STORAGE] Using db_storage_live.py for {event_name} (LIVE database with raw SQL)", file=sys.stderr)
-        from db_storage_live import store_to_live_db
-        return store_to_live_db(df, app_id, tag_id, event_name, db)
+        print(f"[DB_STORAGE] Using db_storage_live_fast.py for {event_name} (LIVE database with BATCH raw SQL)", file=sys.stderr)
+        from db_storage_live_fast import store_to_live_db_fast
+        return store_to_live_db_fast(df, app_id, tag_id, event_name, db)
     
     if event_name not in EVENT_MODELS:
         print(f"❌ Unknown event type: {event_name}")
