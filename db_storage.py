@@ -556,14 +556,25 @@ def store_event_data_to_db(df, app_id, tag_id, event_name):
         # ============================================
         if inserted > 0:
             try:
+                import sys
+                print(f"[DB_STORAGE] About to commit {inserted} records for {event_name}...", file=sys.stderr)
                 db.session.commit()
+                print(f"[DB_STORAGE] Successfully committed {inserted} records for {event_name}", file=sys.stderr)
             except Exception as e:
                 # Final commit error
+                import sys
                 db.session.rollback()
                 print(f"\n❌ Error committing {event_name}:", file=sys.stderr)
                 print(f"  {type(e).__name__}: {str(e)[:200]}", file=sys.stderr)
+                print(f"[DB_STORAGE] Rolled back {inserted} pending records due to commit error", file=sys.stderr)
                 failed += inserted
                 inserted = 0
+        else:
+            # No inserts, but still verify session is clean
+            try:
+                db.session.rollback()
+            except:
+                pass
         
     except Exception as e:
         print(f"❌ Unexpected error during processing for {event_name}: {type(e).__name__}: {str(e)}", file=sys.stderr)

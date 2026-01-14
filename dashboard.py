@@ -709,17 +709,20 @@ def dashboard_stats():
     """API endpoint returning dashboard statistics as JSON"""
     from api import backfill_operations
     from models import db, FactTrip, FactSpeeding, FactIdle, FactAWH, FactWH, FactHA, FactHB, FactWU
+    import os
     import sys
     
     try:
+        # Debug: Print database connection info
+        db_url = os.environ.get('DATABASE_URL', 'NOT SET')
+        print(f"[DASHBOARD] Database URL: {db_url[:60] if db_url != 'NOT SET' else 'NOT SET'}...", file=sys.stderr)
+        print(f"[DASHBOARD] DB Engine: {db.engine.url}", file=sys.stderr)
+        
         # Count active operations
         active_ops = sum(1 for op in backfill_operations.values() if op.get('status') == 'running')
         
         # Count total records from database
         try:
-            # Test connection first
-            db.session.execute('SELECT 1')
-            
             trip_count = db.session.query(FactTrip).count()
             speeding_count = db.session.query(FactSpeeding).count()
             idle_count = db.session.query(FactIdle).count()
@@ -730,11 +733,10 @@ def dashboard_stats():
             wu_count = db.session.query(FactWU).count()
             
             total_records = trip_count + speeding_count + idle_count + awh_count + wh_count + ha_count + hb_count + wu_count
-            add_log(f"Dashboard stats: Trip={trip_count}, Speeding={speeding_count}, Idle={idle_count}, AWH={awh_count}, WH={wh_count}, HA={ha_count}, HB={hb_count}, WU={wu_count}, Total={total_records}")
+            
+            print(f"[DASHBOARD] Counts - Trip: {trip_count}, Speeding: {speeding_count}, Idle: {idle_count}, AWH: {awh_count}, WH: {wh_count}, HA: {ha_count}, HB: {hb_count}, WU: {wu_count}, Total: {total_records}", file=sys.stderr)
         except Exception as e:
-            error_msg = f"DB Query Error: {type(e).__name__}: {str(e)[:200]}"
-            print(error_msg, file=sys.stderr)
-            add_log(error_msg, 'error')
+            print(f"[DASHBOARD ERROR] Database query failed: {type(e).__name__}: {str(e)}", file=sys.stderr)
             total_records = 0
             trip_count = speeding_count = idle_count = awh_count = wh_count = ha_count = hb_count = wu_count = 0
         
