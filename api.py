@@ -174,7 +174,10 @@ def fetch_current_data():
         
         def run_current_fetch():
             try:
+                print(f"\n{'='*80}")
                 print(f"[FETCH-CURRENT] Starting operation {operation_id}", flush=True)
+                print(f"{'='*80}", flush=True)
+                
                 backfill_operations[operation_id] = {
                     'status': 'running',
                     'start_time': datetime.now(),
@@ -189,11 +192,14 @@ def fetch_current_data():
                     'backfill_direct_python.py'
                 )
                 print(f"[FETCH-CURRENT] Running script: {script_path}", flush=True)
+                print(f"[FETCH-CURRENT] Script exists: {os.path.exists(script_path)}", flush=True)
                 
                 # Set environment variable to fetch current week
                 env = os.environ.copy()
                 env['FETCH_CURRENT_WEEK'] = 'true'
+                print(f"[FETCH-CURRENT] Environment FETCH_CURRENT_WEEK=true", flush=True)
                 
+                print(f"[FETCH-CURRENT] Starting subprocess.run()...", flush=True)
                 result = subprocess.run(
                     ['python', script_path],
                     env=env,
@@ -203,6 +209,9 @@ def fetch_current_data():
                 )
                 
                 print(f"[FETCH-CURRENT] Script completed with return code: {result.returncode}", flush=True)
+                print(f"[FETCH-CURRENT] STDOUT length: {len(result.stdout)} chars", flush=True)
+                print(f"[FETCH-CURRENT] STDERR length: {len(result.stderr)} chars", flush=True)
+                
                 backfill_operations[operation_id]['status'] = 'completed'
                 backfill_operations[operation_id]['end_time'] = datetime.now()
                 backfill_operations[operation_id]['output'] = result.stdout
@@ -210,14 +219,24 @@ def fetch_current_data():
                 if result.returncode != 0:
                     backfill_operations[operation_id]['status'] = 'error'
                     backfill_operations[operation_id]['error'] = result.stderr
-                    print(f"[FETCH-CURRENT] Error output: {result.stderr[:500]}", flush=True)
+                    print(f"[FETCH-CURRENT] ❌ Error output:\n{result.stderr[:1000]}", flush=True)
                 else:
-                    print(f"[FETCH-CURRENT] Success output: {result.stdout[:500]}", flush=True)
+                    print(f"[FETCH-CURRENT] ✓ Success! Output (first 1000 chars):\n{result.stdout[:1000]}", flush=True)
                     
+                print(f"{'='*80}", flush=True)
+                print(f"[FETCH-CURRENT] Operation {operation_id} completed", flush=True)
+                print(f"{'='*80}\n", flush=True)
+                    
+            except subprocess.TimeoutExpired:
+                backfill_operations[operation_id]['status'] = 'error'
+                backfill_operations[operation_id]['error'] = 'Script timeout (30 minutes)'
+                print(f"[FETCH-CURRENT] ⏱️ TIMEOUT: Script did not complete within 30 minutes", flush=True)
             except Exception as e:
                 backfill_operations[operation_id]['status'] = 'error'
                 backfill_operations[operation_id]['error'] = str(e)
-                print(f"[FETCH-CURRENT] Exception: {type(e).__name__}: {str(e)}", flush=True)
+                print(f"[FETCH-CURRENT] ❌ Exception: {type(e).__name__}: {str(e)}", flush=True)
+                import traceback
+                print(f"[FETCH-CURRENT] Traceback:\n{traceback.format_exc()}", flush=True)
         
         print(f"[FETCH-CURRENT] Creating daemon thread for operation {operation_id}", flush=True)
         thread = threading.Thread(target=run_current_fetch, daemon=True)
@@ -246,4 +265,24 @@ def health_check():
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "active_backfill_operations": len([op for op in backfill_operations.values() if op.get('status') == 'running'])
+    }), 200
+
+
+@api_bp.route('/fetch-current/<operation_id>', methods=['GET'])
+def fetch_current_status(operation_id):
+    """Get status of a fetch-current operation."""
+    if operation_id not in backfill_operations:
+        return jsonify({
+            "error": f"Operation {operation_id} not found"
+        }), 404
+    
+    op = backfill_operations[operation_id]
+    return jsonify({
+        "operation_id": operation_id,
+        "status": op.get('status', 'unknown'),
+        "start_time": op.get('start_time').isoformat() if op.get('start_time') else None,
+        "end_time": op.get('end_time').isoformat() if op.get('end_time') else None,
+        "output": op.get('output', '')[:2000],  # First 2000 chars
+        "error": op.get('error', ''),
+        "type": op.get('type', 'unknown')
     }), 200
