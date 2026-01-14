@@ -709,6 +709,7 @@ def dashboard_stats():
     """API endpoint returning dashboard statistics as JSON"""
     from api import backfill_operations
     from models import db, FactTrip, FactSpeeding, FactIdle, FactAWH, FactWH, FactHA, FactHB, FactWU
+    import sys
     
     try:
         # Count active operations
@@ -716,6 +717,9 @@ def dashboard_stats():
         
         # Count total records from database
         try:
+            # Test connection first
+            db.session.execute('SELECT 1')
+            
             trip_count = db.session.query(FactTrip).count()
             speeding_count = db.session.query(FactSpeeding).count()
             idle_count = db.session.query(FactIdle).count()
@@ -726,7 +730,11 @@ def dashboard_stats():
             wu_count = db.session.query(FactWU).count()
             
             total_records = trip_count + speeding_count + idle_count + awh_count + wh_count + ha_count + hb_count + wu_count
+            add_log(f"Dashboard stats: Trip={trip_count}, Speeding={speeding_count}, Idle={idle_count}, AWH={awh_count}, WH={wh_count}, HA={ha_count}, HB={hb_count}, WU={wu_count}, Total={total_records}")
         except Exception as e:
+            error_msg = f"DB Query Error: {type(e).__name__}: {str(e)[:200]}"
+            print(error_msg, file=sys.stderr)
+            add_log(error_msg, 'error')
             total_records = 0
             trip_count = speeding_count = idle_count = awh_count = wh_count = ha_count = hb_count = wu_count = 0
         
