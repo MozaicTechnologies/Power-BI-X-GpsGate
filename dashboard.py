@@ -6,6 +6,7 @@ Provides HTML dashboard with Quick Status, Recent Stats, Operation Logs, and API
 from flask import Blueprint, render_template_string, jsonify, make_response, request
 from datetime import datetime
 import os
+from models import db
 
 dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/api')
 
