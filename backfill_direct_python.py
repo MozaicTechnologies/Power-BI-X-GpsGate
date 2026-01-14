@@ -9,6 +9,10 @@ print("[BACKFILL] Script started", flush=True)
 print(f"[BACKFILL] Python version: {sys.version}", flush=True)
 print(f"[BACKFILL] Python executable: {sys.executable}", flush=True)
 
+# Enable BACKFILL_MODE to skip render/result calls and fetch data directly
+os.environ['BACKFILL_MODE'] = 'true'
+print("[BACKFILL] Set BACKFILL_MODE=true to skip render/result calls", flush=True)
+
 from dotenv import load_dotenv
 
 # Load .env first

@@ -8,11 +8,29 @@ from datetime import datetime, timedelta
 import threading
 import subprocess
 import os
+import sys
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
 # Track backfill operations
 backfill_operations = {}
+
+def log_operation(operation_id, message):
+    """Log operation messages to both stderr and a file."""
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    log_msg = f"[{timestamp}] [{operation_id}] {message}"
+    
+    # Write to stderr so it appears in Render logs
+    print(log_msg, file=sys.stderr, flush=True)
+    print(log_msg, flush=True)  # Also stdout
+    
+    # Write to file as backup
+    try:
+        log_file = os.path.join(os.path.dirname(__file__), 'operations.log')
+        with open(log_file, 'a') as f:
+            f.write(log_msg + '\n')
+    except:
+        pass
 
 
 @api_bp.route('/backfill', methods=['POST'])
@@ -169,74 +187,57 @@ def fetch_current_data():
     Fetch current week's data manually.
     Useful for getting latest data without waiting for scheduled backfill.
     """
+    operation_id = f"current_week_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    
     try:
-        operation_id = f"current_week_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        # Log to main thread stderr so it appears in Render logs
+        print(f"[FETCH-CURRENT] {operation_id} - Request received", file=sys.stderr, flush=True)
+        print(f"[FETCH-CURRENT] {operation_id} - Request received", flush=True)
+        
+        backfill_operations[operation_id] = {
+            'status': 'running',
+            'start_time': datetime.now(),
+            'weeks': 1,
+            'type': 'current_week'
+        }
+        
+        print(f"[FETCH-CURRENT] {operation_id} - Operation created, starting background thread", file=sys.stderr, flush=True)
         
         def run_current_fetch():
             try:
-                print(f"\n{'='*80}", flush=True)
-                print(f"[FETCH-CURRENT] Starting operation {operation_id}", flush=True)
-                print(f"{'='*80}", flush=True)
+                print(f"[FETCH-CURRENT] {operation_id} - Background thread started", file=sys.stderr, flush=True)
                 
-                backfill_operations[operation_id] = {
-                    'status': 'running',
-                    'start_time': datetime.now(),
-                    'weeks': 1,
-                    'type': 'current_week'
-                }
-                print(f"[FETCH-CURRENT] Operation status set to running", flush=True)
-                print(f"[FETCH-CURRENT] Total backfill_operations: {len(backfill_operations)}", flush=True)
-                
-                script_path = os.path.join(
-                    os.path.dirname(__file__),
-                    'backfill_direct_python.py'
-                )
-                print(f"[FETCH-CURRENT] Running script: {script_path}", flush=True)
-                print(f"[FETCH-CURRENT] Script exists: {os.path.exists(script_path)}", flush=True)
+                script_path = os.path.join(os.path.dirname(__file__), 'backfill_direct_python.py')
+                print(f"[FETCH-CURRENT] {operation_id} - Script: {script_path}, exists: {os.path.exists(script_path)}", file=sys.stderr, flush=True)
                 
                 # Set environment variable to fetch current week
                 env = os.environ.copy()
                 env['FETCH_CURRENT_WEEK'] = 'true'
-                print(f"[FETCH-CURRENT] Environment FETCH_CURRENT_WEEK=true", flush=True)
+                env['BACKFILL_MODE'] = 'true'  # Skip render/result calls for speed
                 
-                # Create log file for subprocess output
+                print(f"[FETCH-CURRENT] {operation_id} - Executing backfill script with BACKFILL_MODE=true...", file=sys.stderr, flush=True)
+                
+                # Always capture output
+                result = subprocess.run(
+                    ['python', script_path],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=1800  # 30 min timeout
+                )
+                
+                # Write captured output to file
                 log_file_path = os.path.join(os.path.dirname(__file__), f'backfill_log_{operation_id}.txt')
-                print(f"[FETCH-CURRENT] Log file: {log_file_path}", flush=True)
+                with open(log_file_path, 'w') as f:
+                    f.write(result.stdout)
+                    if result.stderr:
+                        f.write(f"\n--- STDERR ---\n{result.stderr}")
                 
-                print(f"[FETCH-CURRENT] Starting subprocess.run()...", flush=True)
-                try:
-                    with open(log_file_path, 'w') as log_file:
-                        result = subprocess.run(
-                            ['python', script_path],
-                            env=env,
-                            stdout=log_file,
-                            stderr=subprocess.STDOUT,  # Redirect stderr to stdout
-                            text=True,
-                            timeout=1800  # 30 min timeout for current week
-                        )
-                except Exception as e:
-                    result = subprocess.run(
-                        ['python', script_path],
-                        env=env,
-                        capture_output=True,
-                        text=True,
-                        timeout=1800  # 30 min timeout for current week
-                    )
-                    with open(log_file_path, 'w') as log_file:
-                        log_file.write(f"Note: Failed to write to log file, using capture_output instead\n")
-                        log_file.write(result.stdout)
-                        if result.stderr:
-                            log_file.write(f"\n--- STDERR ---\n{result.stderr}")
+                log_content = result.stdout + (f"\n--- STDERR ---\n{result.stderr}" if result.stderr else "")
                 
-                # Read the log file content
-                try:
-                    with open(log_file_path, 'r') as log_file:
-                        log_content = log_file.read()
-                except:
-                    log_content = result.stdout if 'result' in locals() else "Could not read log file"
-                
-                print(f"[FETCH-CURRENT] Script completed with return code: {result.returncode}", flush=True)
-                print(f"[FETCH-CURRENT] Log file size: {len(log_content)} bytes", flush=True)
+                # Print key results to stderr so they appear in Render
+                print(f"[FETCH-CURRENT] {operation_id} - Script completed with code: {result.returncode}", file=sys.stderr, flush=True)
+                print(f"[FETCH-CURRENT] {operation_id} - Output size: {len(log_content)} bytes", file=sys.stderr, flush=True)
                 
                 backfill_operations[operation_id]['status'] = 'completed'
                 backfill_operations[operation_id]['end_time'] = datetime.now()
@@ -245,46 +246,40 @@ def fetch_current_data():
                 
                 if result.returncode != 0:
                     backfill_operations[operation_id]['status'] = 'error'
-                    backfill_operations[operation_id]['error'] = log_content[:1000] if log_content else "Unknown error"
-                    print(f"[FETCH-CURRENT] ❌ Error (return code {result.returncode}):\n{log_content[:1000]}", flush=True)
+                    backfill_operations[operation_id]['error'] = log_content[:500]
+                    print(f"[FETCH-CURRENT] {operation_id} - ERROR: {log_content[:300]}", file=sys.stderr, flush=True)
                 else:
-                    print(f"[FETCH-CURRENT] ✓ Success!", flush=True)
-                    print(f"[FETCH-CURRENT] Output length: {len(log_content)} bytes", flush=True)
-                    if log_content:
-                        print(f"[FETCH-CURRENT] First 500 chars:\n{log_content[:500]}", flush=True)
-                    
-                print(f"{'='*80}", flush=True)
-                print(f"[FETCH-CURRENT] Operation {operation_id} completed", flush=True)
-                print(f"{'='*80}\n", flush=True)
+                    print(f"[FETCH-CURRENT] {operation_id} - SUCCESS", file=sys.stderr, flush=True)
                     
             except subprocess.TimeoutExpired:
                 backfill_operations[operation_id]['status'] = 'error'
                 backfill_operations[operation_id]['error'] = 'Script timeout (30 minutes)'
-                print(f"[FETCH-CURRENT] ⏱️ TIMEOUT: Script did not complete within 30 minutes", flush=True)
+                print(f"[FETCH-CURRENT] {operation_id} - TIMEOUT", file=sys.stderr, flush=True)
             except Exception as e:
                 backfill_operations[operation_id]['status'] = 'error'
                 backfill_operations[operation_id]['error'] = str(e)
-                print(f"[FETCH-CURRENT] ❌ Exception: {type(e).__name__}: {str(e)}", flush=True)
-                import traceback
-                print(f"[FETCH-CURRENT] Traceback:\n{traceback.format_exc()}", flush=True)
+                print(f"[FETCH-CURRENT] {operation_id} - EXCEPTION: {type(e).__name__}: {str(e)}", file=sys.stderr, flush=True)
+
         
-        print(f"[FETCH-CURRENT] Creating daemon thread for operation {operation_id}", flush=True)
         thread = threading.Thread(target=run_current_fetch, daemon=True)
         thread.start()
-        print(f"[FETCH-CURRENT] Thread started, responding with 202", flush=True)
+        
+        print(f"[FETCH-CURRENT] {operation_id} - Responding with 202", file=sys.stderr, flush=True)
         
         return jsonify({
             "status": "started",
             "operation_id": operation_id,
-            "message": "Current week data fetch started",
+            "message": "Current week data fetch started in background",
             "estimated_duration_minutes": 1,
             "start_time": datetime.now().isoformat()
         }), 202
         
     except Exception as e:
+        print(f"[FETCH-CURRENT] {operation_id} - MAIN ERROR: {type(e).__name__}: {str(e)}", file=sys.stderr, flush=True)
         return jsonify({
             "status": "error",
-            "message": str(e)
+            "message": str(e),
+            "operation_id": operation_id
         }), 500
 
 
