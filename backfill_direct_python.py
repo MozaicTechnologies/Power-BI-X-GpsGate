@@ -4,31 +4,43 @@ Direct backfill - call process_event_data function directly
 """
 import os
 import sys
+import traceback
 
-print("[BACKFILL] Script started", flush=True)
-print(f"[BACKFILL] Python version: {sys.version}", flush=True)
-print(f"[BACKFILL] Python executable: {sys.executable}", flush=True)
+try:
+    print("[BACKFILL] Script started", flush=True)
+    sys.stderr.write("[BACKFILL] Script started (stderr)\n")
+    sys.stderr.flush()
+    
+    print(f"[BACKFILL] Python version: {sys.version}", flush=True)
+    print(f"[BACKFILL] Python executable: {sys.executable}", flush=True)
 
-# Enable BACKFILL_MODE to skip render/result calls and fetch data directly
-os.environ['BACKFILL_MODE'] = 'true'
-print("[BACKFILL] Set BACKFILL_MODE=true to skip render/result calls", flush=True)
+    # Enable BACKFILL_MODE to skip render/result calls and fetch data directly
+    os.environ['BACKFILL_MODE'] = 'true'
+    print("[BACKFILL] Set BACKFILL_MODE=true to skip render/result calls", flush=True)
 
-from dotenv import load_dotenv
+    from dotenv import load_dotenv
 
-# Load .env first
-print("[BACKFILL] Loading .env file...", flush=True)
-load_dotenv()
-print("[BACKFILL] .env loaded", flush=True)
+    # Load .env first
+    print("[BACKFILL] Loading .env file...", flush=True)
+    load_dotenv()
+    print("[BACKFILL] .env loaded", flush=True)
 
-# Use local DATABASE_URL (not live) - Remove the override that was forcing live database
-print("[BACKFILL] Creating Flask app...", flush=True)
-from application import create_app
-from data_pipeline import process_event_data
-from datetime import datetime, timedelta
-from flask import request
-import json
+    # Use local DATABASE_URL (not live) - Remove the override that was forcing live database
+    print("[BACKFILL] Creating Flask app...", flush=True)
+    from application import create_app
+    from data_pipeline import process_event_data
+    from datetime import datetime, timedelta
+    from flask import request
+    import json
 
-print("[BACKFILL] Imports successful", flush=True)
+    print("[BACKFILL] Imports successful", flush=True)
+
+except Exception as e:
+    error_msg = f"[BACKFILL] FATAL ERROR during import: {str(e)}\n{traceback.format_exc()}"
+    print(error_msg, flush=True)
+    sys.stderr.write(error_msg + "\n")
+    sys.stderr.flush()
+    sys.exit(1)
 
 app = create_app()
 print("[BACKFILL] Flask app created", flush=True)
@@ -142,101 +154,109 @@ endpoint_accounting = []
 
 print("[BACKFILL] Starting main backfill loop...", flush=True)
 
-# Process each of 8 endpoints (each internally processes multiple weeks)
-for i, (name, event_type, response_key) in enumerate(ENDPOINTS, 1):
-    print(f"[{i}/8] {name}")
-    print("-" * 80)
-    
-    # Select appropriate payload (Trip uses different report_id)
-    if event_type == "Trip":
-        payload = trip_payload.copy()
-    else:
-        payload = payload_template.copy()
-    
-    # Build date range for this backfill
-    if weeks:
-        first_week = weeks[0]
-        last_week = weeks[-1]
+try:
+    # Process each of 8 endpoints (each internally processes multiple weeks)
+    for i, (name, event_type, response_key) in enumerate(ENDPOINTS, 1):
+        print(f"[{i}/8] {name}")
+        print("-" * 80)
         
-        from datetime import datetime, timezone
-        period_start_iso = datetime.fromtimestamp(first_week['week_start'], timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-        period_end_iso = datetime.fromtimestamp(last_week['week_end'], timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        # Select appropriate payload (Trip uses different report_id)
+        if event_type == "Trip":
+            payload = trip_payload.copy()
+        else:
+            payload = payload_template.copy()
         
-        payload["period_start"] = period_start_iso
-        payload["period_end"] = period_end_iso
-    
-    # Add event_id if needed
-    if event_ids[event_type]:
-        payload["event_id"] = event_ids[event_type]
-    
-    # Call process_event_data within Flask request context
-    with app.test_request_context(
-        '/endpoint',
-        method='POST',
-        data=json.dumps(payload),
-        content_type='application/json'
-    ):
-        from flask import request as flask_request
-        response_data, status_code = process_event_data(event_type, response_key)
+        # Build date range for this backfill
+        if weeks:
+            first_week = weeks[0]
+            last_week = weeks[-1]
+            
+            from datetime import datetime, timezone
+            period_start_iso = datetime.fromtimestamp(first_week['week_start'], timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+            period_end_iso = datetime.fromtimestamp(last_week['week_end'], timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+            
+            payload["period_start"] = period_start_iso
+            payload["period_end"] = period_end_iso
         
-        if isinstance(response_data, tuple):
-            response_data = response_data[0]
+        # Add event_id if needed
+        if event_ids[event_type]:
+            payload["event_id"] = event_ids[event_type]
         
-        result = response_data.get_json() if hasattr(response_data, 'get_json') else response_data
+        # Call process_event_data within Flask request context
+        with app.test_request_context(
+            '/endpoint',
+            method='POST',
+            data=json.dumps(payload),
+            content_type='application/json'
+        ):
+            from flask import request as flask_request
+            response_data, status_code = process_event_data(event_type, response_key)
+            
+            if isinstance(response_data, tuple):
+                response_data = response_data[0]
+            
+            result = response_data.get_json() if hasattr(response_data, 'get_json') else response_data
+            
+            rows = len(result.get(response_key, [])) if isinstance(result, dict) else 0
+            db_stats = result.get('db_stats', {}) if isinstance(result, dict) else {}
+            accounting = result.get('accounting', {}) if isinstance(result, dict) else {}
+            
+            raw_fetched = accounting.get('raw_fetched', 0)
+            internal_dupes = accounting.get('internal_dupes_removed', 0)
+            rows_after_dedup = accounting.get('rows_after_dedup', 0)
+            db_dupes_flagged = accounting.get('db_duplicates_flagged', 0)
+            db_failed = accounting.get('db_failed', 0)
+            total_db_inserted = accounting.get('total_inserted', 0)
+            
+            print(f"  Status: OK (HTTP 200)")
+            print(f"  Fetched (raw): {raw_fetched:,}")
+            print(f"  Internal Dupes Removed: {internal_dupes:,}")
+            print(f"  After Dedup: {rows_after_dedup:,}")
+            print(f"  DB-Level Dupes Flagged: {db_dupes_flagged:,}")
+            print(f"  DB Failed: {db_failed:,}")
+            print(f"  Total Inserted: {total_db_inserted:,}")
+            
+            total_rows += rows
+            total_inserted += db_stats.get('inserted', 0)
+            total_failed += db_stats.get('failed', 0)
+            total_raw += raw_fetched
+            total_internal_dupes += internal_dupes
+            total_db_dupes += db_dupes_flagged
+            
+            endpoint_accounting.append({
+                "endpoint": name,
+                "raw_fetched": raw_fetched,
+                "internal_dupes": internal_dupes,
+                "after_dedup": rows_after_dedup,
+                "db_dupes": db_dupes_flagged,
+                "db_failed": db_failed,
+                "inserted": total_db_inserted
+            })
         
-        rows = len(result.get(response_key, [])) if isinstance(result, dict) else 0
-        db_stats = result.get('db_stats', {}) if isinstance(result, dict) else {}
-        accounting = result.get('accounting', {}) if isinstance(result, dict) else {}
-        
-        raw_fetched = accounting.get('raw_fetched', 0)
-        internal_dupes = accounting.get('internal_dupes_removed', 0)
-        rows_after_dedup = accounting.get('rows_after_dedup', 0)
-        db_dupes_flagged = accounting.get('db_duplicates_flagged', 0)
-        db_failed = accounting.get('db_failed', 0)
-        total_db_inserted = accounting.get('total_inserted', 0)
-        
-        print(f"  Status: OK (HTTP 200)")
-        print(f"  Fetched (raw): {raw_fetched:,}")
-        print(f"  Internal Dupes Removed: {internal_dupes:,}")
-        print(f"  After Dedup: {rows_after_dedup:,}")
-        print(f"  DB-Level Dupes Flagged: {db_dupes_flagged:,}")
-        print(f"  DB Failed: {db_failed:,}")
-        print(f"  Total Inserted: {total_db_inserted:,}")
-        
-        total_rows += rows
-        total_inserted += db_stats.get('inserted', 0)
-        total_failed += db_stats.get('failed', 0)
-        total_raw += raw_fetched
-        total_internal_dupes += internal_dupes
-        total_db_dupes += db_dupes_flagged
-        
-        endpoint_accounting.append({
-            "endpoint": name,
-            "raw_fetched": raw_fetched,
-            "internal_dupes": internal_dupes,
-            "after_dedup": rows_after_dedup,
-            "db_dupes": db_dupes_flagged,
-            "db_failed": db_failed,
-            "inserted": total_db_inserted
-        })
-    
-    print()
+        print()
 
-print("=" * 80)
-print("COMPLETE ROW ACCOUNTING ACROSS ALL 8 ENDPOINTS")
-print("=" * 80)
-print(f"Total Raw Rows Fetched from API:          {total_raw:>10,}")
-print(f"  - Internal Duplicates Removed (CSV):   -{total_internal_dupes:>10,}")
-print(f"  = Rows After Deduplication:             {total_raw - total_internal_dupes:>10,}")
-print(f"  - Database-Level Duplicates (flagged):  -{total_db_dupes:>10,}")
-print(f"  - Failed DB Inserts:                    -{total_failed:>10,}")
-print(f"  = TOTAL INSERTED TO DB:                 {total_inserted:>10,}")
-print("=" * 80)
-print("\nBREAKDOWN BY ENDPOINT:")
-print("=" * 80)
-for acct in endpoint_accounting:
-    print(f"{acct['endpoint']:12} | Raw: {acct['raw_fetched']:>6} | Internal Dupes: {acct['internal_dupes']:>6} | After Dedup: {acct['after_dedup']:>6} | DB Dupes: {acct['db_dupes']:>6} | Inserted: {acct['inserted']:>6}")
-print("=" * 80)
-print("[BACKFILL] Script completed successfully!", flush=True)
-sys.exit(0)
+    print("=" * 80)
+    print("COMPLETE ROW ACCOUNTING ACROSS ALL 8 ENDPOINTS")
+    print("=" * 80)
+    print(f"Total Raw Rows Fetched from API:          {total_raw:>10,}")
+    print(f"  - Internal Duplicates Removed (CSV):   -{total_internal_dupes:>10,}")
+    print(f"  = Rows After Deduplication:             {total_raw - total_internal_dupes:>10,}")
+    print(f"  - Database-Level Duplicates (flagged):  -{total_db_dupes:>10,}")
+    print(f"  - Failed DB Inserts:                    -{total_failed:>10,}")
+    print(f"  = TOTAL INSERTED TO DB:                 {total_inserted:>10,}")
+    print("=" * 80)
+    print("\nBREAKDOWN BY ENDPOINT:")
+    print("=" * 80)
+    for acct in endpoint_accounting:
+        print(f"{acct['endpoint']:12} | Raw: {acct['raw_fetched']:>6} | Internal Dupes: {acct['internal_dupes']:>6} | After Dedup: {acct['after_dedup']:>6} | DB Dupes: {acct['db_dupes']:>6} | Inserted: {acct['inserted']:>6}")
+    print("=" * 80)
+    print("[BACKFILL] Script completed successfully!", flush=True)
+    sys.exit(0)
+
+except Exception as e:
+    error_msg = f"[BACKFILL] FATAL ERROR in main loop: {str(e)}\n{traceback.format_exc()}"
+    print(error_msg, flush=True)
+    sys.stderr.write(error_msg + "\n")
+    sys.stderr.flush()
+    sys.exit(1)
 
