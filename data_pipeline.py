@@ -251,7 +251,7 @@ def process_event_data(event_name, response_key):
             try:
                 # BACKFILL MODE: Skip render/result calls for speed - just fetch and insert data
                 if BACKFILL_MODE:
-                    print(f"  [BACKFILL] Skipping /render and /result calls - fetching data directly from CSV")
+                    print(f"  [BACKFILL] Skipping /render and /result calls - fetching data directly from CSV", file=sys.stderr)
                     # Directly fetch CSV without rendering
                     import requests as req_module
                     csv_resp = RESILIENT_SESSION.post(
@@ -268,12 +268,15 @@ def process_event_data(event_name, response_key):
                         timeout=(10, 30)
                     )
                     
+                    print(f"  [BACKFILL] GenerateReport response status: {csv_resp.status_code}", file=sys.stderr)
+                    
                     if csv_resp.status_code != 200:
+                        print(f"  ✗ CSV fetch failed (status {csv_resp.status_code}): {csv_resp.text[:200]}", file=sys.stderr)
                         print(f"  ✗ CSV fetch failed (status {csv_resp.status_code}), skipping week")
                         continue
                     
                     csv_data = csv_resp.content
-                    print(f"  ✓ CSV fetched directly ({len(csv_data):,} bytes)")
+                    print(f"  ✓ CSV fetched directly ({len(csv_data):,} bytes)", file=sys.stderr)
                 else:
                     # NORMAL MODE: Call /render endpoint to initiate rendering
                     render_payload = {
@@ -349,12 +352,22 @@ def process_event_data(event_name, response_key):
                         continue
                     
                     csv_data = csv_resp.content
-                if not csv_content:
+                    print(f"  ✓ CSV data retrieved ({len(csv_data):,} bytes)", file=sys.stderr)
+                
+                # FIX: Check csv_data (not undefined csv_content) after both BACKFILL and NORMAL modes
+                if not csv_data:
                     print(f"  ✗ No CSV content received, skipping week")
                     continue
 
                 print(f"  → Cleaning and parsing CSV data...")
-                df = clean_csv_data(csv_content)
+                df = clean_csv_data(csv_data)
+                
+                # DEBUG: Log DataFrame details
+                print(f"  [DEBUG] clean_csv_data returned: type={type(df)}, is_none={df is None}, is_empty={df.empty if df is not None else 'N/A'}", file=sys.stderr)
+                if df is not None and not df.empty:
+                    print(f"  [DEBUG] DataFrame shape: {df.shape}, columns: {df.columns.tolist()}", file=sys.stderr)
+                    print(f"  [DEBUG] First 2 rows:\n{df.head(2).to_string()}", file=sys.stderr)
+                
                 if df is not None and not df.empty:
                     df_original = len(df)
                     total_rows_raw += df_original
