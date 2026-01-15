@@ -55,6 +55,8 @@ def build_weekly_schedule(current_week_only=None):
     if current_week_only is None:
         current_week_only = os.environ.get('FETCH_CURRENT_WEEK', 'false').lower() == 'true'
     
+    print(f"[BACKFILL] build_weekly_schedule called with current_week_only={current_week_only}", flush=True)
+    
     if current_week_only:
         # Calculate current week (today's date determines which week)
         today = datetime.now()
@@ -103,6 +105,7 @@ def build_weekly_schedule(current_week_only=None):
         return weeks
 
 weeks = build_weekly_schedule(current_week_only=FETCH_CURRENT_WEEK)
+print(f"[BACKFILL] Got {len(weeks)} week(s) to process", flush=True)
 print(f"Processing {len(weeks)} week(s)\n")
 
 # Endpoints configuration
