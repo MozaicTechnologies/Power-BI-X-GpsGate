@@ -61,7 +61,7 @@ class FactTrip(db.Model):
     stop_time = db.Column(db.DateTime, nullable=True)
     duration = db.Column(db.String(50), nullable=True)
     vehicle = db.Column(db.String(255), nullable=True)
-    address = db.Column(db.String(500), nullable=True)
+    location = db.Column(db.String(500), nullable=True)
     distance_gps = db.Column(db.Float, nullable=True)
     max_speed = db.Column(db.Float, nullable=True)
     avg_speed = db.Column(db.Float, nullable=True)
@@ -88,7 +88,7 @@ class FactSpeeding(db.Model):
     event_date = db.Column(db.DateTime, nullable=False)
     event_time = db.Column(db.DateTime, nullable=False)
     vehicle = db.Column(db.String(255), nullable=True)
-    address = db.Column(db.String(500), nullable=True)
+    location = db.Column(db.String(500), nullable=True)
     speed = db.Column(db.Float, nullable=True)
     speed_limit = db.Column(db.Float, nullable=True)
     over_limit = db.Column(db.Float, nullable=True)
@@ -113,7 +113,7 @@ class FactIdle(db.Model):
     stop_time = db.Column(db.DateTime, nullable=True)
     duration = db.Column(db.String(50), nullable=True)
     vehicle = db.Column(db.String(255), nullable=True)
-    address = db.Column(db.String(500), nullable=True)
+    location = db.Column(db.String(500), nullable=True)
     is_duplicate = db.Column(db.Boolean, default=False, nullable=False)  # Flag for duplicate records
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     
@@ -132,7 +132,7 @@ class FactAWH(db.Model):
     event_date = db.Column(db.DateTime, nullable=False)
     event_time = db.Column(db.DateTime, nullable=False)
     vehicle = db.Column(db.String(255), nullable=True)
-    address = db.Column(db.String(500), nullable=True)
+    location = db.Column(db.String(500), nullable=True)
     duration = db.Column(db.String(50), nullable=True)
     is_duplicate = db.Column(db.Boolean, default=False, nullable=False)  # Flag for duplicate records
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -152,7 +152,7 @@ class FactWH(db.Model):
     event_date = db.Column(db.DateTime, nullable=False)
     event_time = db.Column(db.DateTime, nullable=False)
     vehicle = db.Column(db.String(255), nullable=True)
-    address = db.Column(db.String(500), nullable=True)
+    location = db.Column(db.String(500), nullable=True)
     duration = db.Column(db.String(50), nullable=True)
     is_duplicate = db.Column(db.Boolean, default=False, nullable=False)  # Flag for duplicate records
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -172,7 +172,7 @@ class FactHA(db.Model):
     event_date = db.Column(db.DateTime, nullable=False)
     event_time = db.Column(db.DateTime, nullable=False)
     vehicle = db.Column(db.String(255), nullable=True)
-    address = db.Column(db.String(500), nullable=True)
+    location = db.Column(db.String(500), nullable=True)
     severity = db.Column(db.String(50), nullable=True)
     is_duplicate = db.Column(db.Boolean, default=False, nullable=False)  # Flag for duplicate records
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -192,7 +192,7 @@ class FactHB(db.Model):
     event_date = db.Column(db.DateTime, nullable=False)
     event_time = db.Column(db.DateTime, nullable=False)
     vehicle = db.Column(db.String(255), nullable=True)
-    address = db.Column(db.String(500), nullable=True)
+    location = db.Column(db.String(500), nullable=True)
     severity = db.Column(db.String(50), nullable=True)
     is_duplicate = db.Column(db.Boolean, default=False, nullable=False)  # Flag for duplicate records
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -212,7 +212,7 @@ class FactWU(db.Model):
     event_date = db.Column(db.DateTime, nullable=False)
     event_time = db.Column(db.DateTime, nullable=False)
     vehicle = db.Column(db.String(255), nullable=True)
-    address = db.Column(db.String(500), nullable=True)
+    location = db.Column(db.String(500), nullable=True)
     violation_type = db.Column(db.String(100), nullable=True)
     is_duplicate = db.Column(db.Boolean, default=False, nullable=False)  # Flag for duplicate records
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)

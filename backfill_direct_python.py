@@ -16,7 +16,11 @@ try:
 
     # Enable BACKFILL_MODE to skip render/result calls and fetch data directly
     os.environ['BACKFILL_MODE'] = 'true'
-    print("[BACKFILL] Set BACKFILL_MODE=true to skip render/result calls", flush=True)
+    print("[BACKFILL] Set BACKFILL_MODE=true to skip render/result callsder/result calls", flush=True)
+    
+    # Fetch only current week, not historical data
+    os.environ['FETCH_CURRENT_WEEK'] = 'true'
+    print("[BACKFILL] Set FETCH_CURRENT_WEEK=true to fetch only current week", flush=True)
 
     from dotenv import load_dotenv
 
