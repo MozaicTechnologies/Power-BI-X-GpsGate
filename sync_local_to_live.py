@@ -52,12 +52,12 @@ FACT_TABLES = [
     # "fact_ha",
     # "fact_hb",
     # "fact_wu",
-    # "dim_drivers",
-    # "dim_tags",
-    # "dim_vehicles",
-    # "dim_reports",
-    # "dim_event_rules",
-    # "dim_vehicle_custom_fields",
+    "dim_drivers",
+    "dim_tags",
+    "dim_vehicles",
+    "dim_reports",
+    "dim_event_rules",
+    "dim_vehicle_custom_fields",
 ]
 
 print("=" * 80)

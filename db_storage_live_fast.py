@@ -221,6 +221,148 @@
 
 # db_storage_live_fast.py
 
+# import pandas as pd
+# from datetime import datetime
+# from sqlalchemy import text
+# import logging
+# from models import db
+
+# logger = logging.getLogger("DATA_PIPELINE")
+
+
+# def _safe_float(v):
+#     try:
+#         return float(v) if pd.notna(v) else None
+#     except Exception:
+#         return None
+
+
+# def store_event_data_to_db(df, app_id, tag_id, event_name):
+#     logger.info("[DB_STORAGE] ✅ FAST STORAGE ACTIVE")
+
+#     if df is None or df.empty:
+#         return {"inserted": 0, "skipped": 0, "failed": 0}
+
+#     table = {
+#         "Trip": "fact_trip",
+#         "Speeding": "fact_speeding",
+#         "Idle": "fact_idle",
+#         "AWH": "fact_awh",
+#         "WH": "fact_wh",
+#         "HA": "fact_ha",
+#         "HB": "fact_hb",
+#         "WU": "fact_wu",
+#     }.get(event_name)
+
+#     if not table:
+#         return {"inserted": 0, "skipped": 0, "failed": 0}
+
+#     records = []
+#     skipped = failed = 0
+
+#     for _, row in df.iterrows():
+#         try:
+#             # ---- datetime
+#             if event_name == "Trip":
+#                 dt = pd.to_datetime(row.get("Start Time"), errors="coerce")
+#             else:
+#                 dt = pd.to_datetime(
+#                     f"{row.get('Start Date')} {row.get('Start Time')}",
+#                     errors="coerce"
+#                 )
+
+#             if pd.isna(dt):
+#                 skipped += 1
+#                 continue
+
+#             event_date = dt
+#             event_time = dt
+
+#             vehicle = str(row.get("Vehicle", "")).strip()
+#             if not vehicle:
+#                 skipped += 1
+#                 continue
+
+#             address = (
+#                 str(row.get("Address", "")).strip()
+#                 or str(row.get("Start Address", "")).strip()
+#             )
+
+#             base = {
+#                 "app_id": app_id,
+#                 "tag_id": tag_id,
+#                 "event_date": event_date,
+#                 "vehicle": vehicle,
+#                 "address": address,
+#                 "created_at": datetime.utcnow(),
+#             }
+
+#             if event_name == "Trip":
+#                 base.update({
+#                     "start_time": event_date,
+#                     "stop_time": pd.to_datetime(row.get("Stop Time"), errors="coerce"),
+#                     "duration": row.get("Duration"),
+#                     "distance_gps": _safe_float(row.get("Distance (GPS)")),
+#                     "max_speed": _safe_float(row.get("Max Speed")),
+#                     "avg_speed": _safe_float(row.get("Avg Speed")),
+#                     "event_state": row.get("Trip/Idle*"),
+#                 })
+
+#             elif event_name == "Idle":
+#                 base.update({
+#                     "start_time": event_date,
+#                     "duration": row.get("Duration"),
+#                 })
+
+#             elif event_name in {"Speeding", "AWH", "WH"}:
+#                 base.update({
+#                     "event_time": event_time,
+#                     "duration": row.get("Duration"),
+#                 })
+
+#             elif event_name == "HA":
+#                 base.update({
+#                     "event_time": event_time,
+#                     "severity": row.get("Acceleration"),
+#                 })
+
+#             elif event_name == "HB":
+#                 base.update({
+#                     "event_time": event_time,
+#                     "severity": row.get("Braking"),
+#                 })
+
+#             elif event_name == "WU":
+#                 base.update({
+#                     "event_time": event_time,
+#                     "violation_type": row.get("Event State"),
+#                 })
+
+#             records.append(base)
+
+#         except Exception:
+#             failed += 1
+
+#     if not records:
+#         return {"inserted": 0, "skipped": skipped, "failed": failed}
+
+#     cols = records[0].keys()
+#     sql = f"""
+#         INSERT INTO {table} ({", ".join(cols)})
+#         VALUES ({", ".join(f":{c}" for c in cols)})
+#         ON CONFLICT DO NOTHING
+#     """
+
+#     try:
+#         db.session.execute(text(sql), records)
+#         db.session.commit()
+#         return {"inserted": len(records), "skipped": skipped, "failed": failed}
+#     except Exception:
+#         db.session.rollback()
+#         logger.exception(f"[DB_STORAGE] {event_name} insert failed")
+#         return {"inserted": 0, "skipped": skipped, "failed": len(records)}
+
+
 import pandas as pd
 from datetime import datetime
 from sqlalchemy import text
@@ -228,6 +370,13 @@ import logging
 from models import db
 
 logger = logging.getLogger("DATA_PIPELINE")
+
+
+def _safe_int(v):
+    try:
+        return int(v) if pd.notna(v) else None
+    except Exception:
+        return None
 
 
 def _safe_float(v):
@@ -238,7 +387,7 @@ def _safe_float(v):
 
 
 def store_event_data_to_db(df, app_id, tag_id, event_name):
-    logger.info("[DB_STORAGE] ✅ FAST STORAGE ACTIVE")
+    logger.info("[DB_STORAGE] FAST MODE ENABLED")
 
     if df is None or df.empty:
         return {"inserted": 0, "skipped": 0, "failed": 0}
@@ -262,81 +411,89 @@ def store_event_data_to_db(df, app_id, tag_id, event_name):
 
     for _, row in df.iterrows():
         try:
-            # ---- datetime
-            if event_name == "Trip":
-                dt = pd.to_datetime(row.get("Start Time"), errors="coerce")
-            else:
-                dt = pd.to_datetime(
-                    f"{row.get('Start Date')} {row.get('Start Time')}",
-                    errors="coerce"
-                )
-
-            if pd.isna(dt):
-                skipped += 1
-                continue
-
-            event_date = dt
-            event_time = dt
-
             vehicle = str(row.get("Vehicle", "")).strip()
             if not vehicle:
                 skipped += 1
                 continue
+
+            driver = (
+                str(row.get("Driver", "")).strip()
+                or str(row.get("Driver Name", "")).strip()
+            )
 
             address = (
                 str(row.get("Address", "")).strip()
                 or str(row.get("Start Address", "")).strip()
             )
 
-            base = {
-                "app_id": app_id,
-                "tag_id": tag_id,
-                "event_date": event_date,
-                "vehicle": vehicle,
-                "address": address,
-                "created_at": datetime.utcnow(),
-            }
-
+            # ---------------- TRIP ----------------
             if event_name == "Trip":
-                base.update({
-                    "start_time": event_date,
-                    "stop_time": pd.to_datetime(row.get("Stop Time"), errors="coerce"),
+                start_dt = pd.to_datetime(row.get("Start Time"), errors="coerce")
+                stop_dt = pd.to_datetime(row.get("Stop Time"), errors="coerce")
+
+                if pd.isna(start_dt):
+                    skipped += 1
+                    continue
+
+                base = {
+                    "app_id": app_id,
+                    "tag_id": tag_id,
+                    "event_date": start_dt,
+                    "start_time": start_dt.time(),
+                    "stop_time": stop_dt,
+                    "vehicle": vehicle,
+                    "driver": driver,
+                    "address": address,
                     "duration": row.get("Duration"),
+                    "duration_s": _safe_int(row.get("Duration (s)")),
                     "distance_gps": _safe_float(row.get("Distance (GPS)")),
                     "max_speed": _safe_float(row.get("Max Speed")),
                     "avg_speed": _safe_float(row.get("Avg Speed")),
                     "event_state": row.get("Trip/Idle*"),
-                })
+                    "created_at": datetime.utcnow(),
+                }
 
-            elif event_name == "Idle":
-                base.update({
-                    "start_time": event_date,
+            # ---------------- NON-TRIP ----------------
+            else:
+                start_date = pd.to_datetime(row.get("Start Date"), errors="coerce")
+                start_time = pd.to_datetime(row.get("Start Time"), errors="coerce")
+
+                if pd.isna(start_date) or pd.isna(start_time):
+                    skipped += 1
+                    continue
+
+                event_time = datetime.combine(
+                    start_date.date(),
+                    start_time.time()
+                )
+
+                base = {
+                    "app_id": app_id,
+                    "tag_id": tag_id,
+                    "event_date": start_date.date(),
+                    "start_time": start_time.time(),
+                    "event_time": event_time,
+                    "vehicle": vehicle,
+                    "driver": driver,
+                    "address": address,
                     "duration": row.get("Duration"),
-                })
+                    "duration_s": _safe_int(row.get("Duration (s)")),
+                    "created_at": datetime.utcnow(),
+                }
 
-            elif event_name in {"Speeding", "AWH", "WH"}:
-                base.update({
-                    "event_time": event_time,
-                    "duration": row.get("Duration"),
-                })
+                if event_name == "Speeding":
+                    base.update({
+                        "speed": _safe_float(row.get("Speed")),
+                        "speed_limit": _safe_float(row.get("Speed Limit")),
+                        "over_limit": _safe_float(row.get("Over Limit")),
+                        "max_speed": _safe_float(row.get("Max Speed")),
+                    })
 
-            elif event_name == "HA":
-                base.update({
-                    "event_time": event_time,
-                    "severity": row.get("Acceleration"),
-                })
+                elif event_name in {"HA", "HB"}:
+                    base["severity"] = row.get("Acceleration") or row.get("Braking")
 
-            elif event_name == "HB":
-                base.update({
-                    "event_time": event_time,
-                    "severity": row.get("Braking"),
-                })
-
-            elif event_name == "WU":
-                base.update({
-                    "event_time": event_time,
-                    "violation_type": row.get("Event State"),
-                })
+                elif event_name == "WU":
+                    base["violation_type"] = row.get("Event State")
 
             records.append(base)
 
