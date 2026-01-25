@@ -52,7 +52,7 @@
 # MAX_WEEKS_OTHER = 1    # Other events: 1 week per call (incremental weekly pulls)
 
 # # Centralized Base URL for Microservices (local development default)
-# BASE_SERVICE_URL = os.getenv("BACKEND_HOST", "http://localhost:5000")
+# BASE_SERVICE_URL = os.getenv("BACKEND_HOST", "http://127.0.0.1:5000")
 # RENDER_URL = f"{BASE_SERVICE_URL}/render"
 # RESULT_URL = f"{BASE_SERVICE_URL}/result"
 # API_PROXY_URL = f"{BASE_SERVICE_URL}/api"
@@ -825,7 +825,7 @@ pipeline_bp = Blueprint("pipeline_bp", __name__)
 
 MAX_EXECUTION_SECONDS = 600
 
-BASE_SERVICE_URL = os.getenv("BACKEND_HOST", "http://localhost:5000")
+BASE_SERVICE_URL = os.getenv("BACKEND_HOST", "http://127.0.0.1:5000")
 RENDER_URL = f"{BASE_SERVICE_URL}/render"
 RESULT_URL = f"{BASE_SERVICE_URL}/result"
 
@@ -856,37 +856,153 @@ RESILIENT_SESSION = create_resilient_session()
 # CSV CLEANER
 # ------------------------------------------------------------------------------
 
+# def clean_csv_data(file_bytes):
+#     try:
+#         df = pd.read_csv(
+#             io.BytesIO(file_bytes),
+#             delimiter=",",
+#             encoding="utf-8",
+#             skiprows=8,
+#             dtype=str,
+#             engine="python",
+#             on_bad_lines="skip"
+#         )
+
+#         df.columns = [c.strip() for c in df.columns]
+
+#         if "Vehicle" not in df.columns:
+#             logger.warning("CSV missing Vehicle column")
+#             return None
+
+#         df = df[df["Vehicle"].notna() & (df["Vehicle"].str.strip() != "")]
+#         df = df.reset_index(drop=True)
+
+#         logger.info(f"CSV parsed rows={len(df)} cols={list(df.columns)}")
+#         if not df.empty:
+#             logger.debug("CSV sample row logged (content suppressed due to unicode)")
+
+
+#         return df
+
+#     except Exception as e:
+#         logger.exception(f"CSV clean failed: {e}")
+#         return None
+
+# def clean_csv_data(file_bytes):
+#     for enc in ("utf-8", "utf-8-sig", "cp1252", "latin1"):
+#         try:
+#             df = pd.read_csv(
+#                 io.BytesIO(file_bytes),
+#                 delimiter=",",
+#                 encoding=enc,
+#                 skiprows=8,
+#                 dtype=str,
+#                 engine="python",
+#                 on_bad_lines="skip"
+#             )
+
+#             df.columns = [c.strip() for c in df.columns]
+
+#             # normalize common variants
+#             rename_map = {}
+#             for c in df.columns:
+#                 if c.strip().lower() == "vehicle":
+#                     rename_map[c] = "Vehicle"
+#             if rename_map:
+#                 df = df.rename(columns=rename_map)
+
+#             if "Vehicle" not in df.columns:
+#                 logger.warning(f"CSV missing Vehicle column (encoding tried: {enc})")
+#                 return None
+
+#             df = df[df["Vehicle"].notna() & (df["Vehicle"].str.strip() != "")]
+#             df = df.reset_index(drop=True)
+
+#             logger.info(f"CSV parsed rows={len(df)} encoding={enc}")
+#             return df
+
+#         except UnicodeDecodeError:
+#             continue
+#         except Exception as e:
+#             logger.exception(f"CSV clean failed (encoding={enc}): {e}")
+#             return None
+
+#     logger.error("CSV decode failed for all encodings tried")
+#     return None
+
+
+import io
+import pandas as pd
+
 def clean_csv_data(file_bytes):
-    try:
-        df = pd.read_csv(
+    encodings = ("utf-8", "utf-8-sig", "cp1252", "latin1")
+
+    def _read_csv(enc, skip):
+        return pd.read_csv(
             io.BytesIO(file_bytes),
             delimiter=",",
-            encoding="utf-8",
-            skiprows=8,
+            encoding=enc,
+            skiprows=skip,
             dtype=str,
             engine="python",
             on_bad_lines="skip"
         )
 
-        df.columns = [c.strip() for c in df.columns]
+    for enc in encodings:
+        try:
+            # 1) First attempt (your current behavior)
+            df = _read_csv(enc, skip=8)
 
-        if "Vehicle" not in df.columns:
-            logger.warning("CSV missing Vehicle column")
+            # If skiprows=8 caused header issues (common in messy exports), retry
+            if df is None or df.empty or len(df.columns) <= 1:
+                logger.warning(f"CSV looks empty/invalid after skiprows=8, retrying skiprows=0 (encoding={enc})")
+                df = _read_csv(enc, skip=0)
+
+            # ---- Clean / normalize columns
+            df.columns = [
+                " ".join(str(c).strip().split())  # strip + collapse multiple spaces
+                for c in df.columns
+            ]
+
+            # Normalize Vehicle column variants -> "Vehicle"
+            rename_map = {}
+            for c in df.columns:
+                if str(c).strip().lower() == "vehicle":
+                    rename_map[c] = "Vehicle"
+            if rename_map:
+                df = df.rename(columns=rename_map)
+
+            # ---- Log columns (this is what you said you were seeing earlier)
+            logger.info(f"CSV parsed rows={len(df)} encoding={enc}")
+            logger.info(f"CSV columns count={len(df.columns)} encoding={enc}")
+            logger.info(f"CSV columns (first 12)={', '.join(list(df.columns)[:12])} encoding={enc}")
+
+            logger.info(f"CSV columns={list(df.columns)} encoding={enc}")
+
+            # ---- Validate Vehicle
+            if "Vehicle" not in df.columns:
+                logger.warning(
+                    f"CSV missing Vehicle column (encoding tried: {enc}). "
+                    f"Available columns: {list(df.columns)}"
+                )
+                return None
+
+            # ---- Clean rows with missing vehicle
+            df["Vehicle"] = df["Vehicle"].astype(str)
+            df = df[df["Vehicle"].notna() & (df["Vehicle"].str.strip() != "")]
+            df = df.reset_index(drop=True)
+
+            return df
+
+        except UnicodeDecodeError:
+            continue
+        except Exception as e:
+            logger.exception(f"CSV clean failed (encoding={enc}): {e}")
             return None
 
-        df = df[df["Vehicle"].notna() & (df["Vehicle"].str.strip() != "")]
-        df = df.reset_index(drop=True)
+    logger.error("CSV decode failed for all encodings tried")
+    return None
 
-        logger.info(f"CSV parsed rows={len(df)} cols={list(df.columns)}")
-        if not df.empty:
-            logger.debug("CSV sample row logged (content suppressed due to unicode)")
-
-
-        return df
-
-    except Exception as e:
-        logger.exception(f"CSV clean failed: {e}")
-        return None
 
 # ------------------------------------------------------------------------------
 # WEEK RESOLUTION

@@ -17,7 +17,7 @@ import time
 warnings.filterwarnings('ignore')
 
 # Configuration
-BASE_URL = "http://localhost:5000"
+BASE_URL = "http://127.0.0.1:5000"
 APP_ID = "6"
 TOKEN = "v2:MDAwMDAyODkwMDozOWM1MzQ1YWU2N2I4YWQ3MThhZA=="
 GPSGATE_URL = "https://omantracking2.com"

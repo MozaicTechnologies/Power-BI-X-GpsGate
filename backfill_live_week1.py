@@ -32,7 +32,7 @@ from datetime import datetime
 ENDPOINTS = [
     {
         "name": "TRIP",
-        "url": "http://localhost:5000/trip-data",
+        "url": "http://127.0.0.1:5000/trip-data",
         "config": {
             "app_id": "6",
             "token": "v2:MDAwMDAyODkwMDozOWM1MzQ1YWU2N2I4YWQ3MThhZA==",
@@ -44,7 +44,7 @@ ENDPOINTS = [
     },
     {
         "name": "SPEEDING",
-        "url": "http://localhost:5000/speeding-data",
+        "url": "http://127.0.0.1:5000/speeding-data",
         "config": {
             "app_id": "6",
             "token": "v2:MDAwMDAyODkwMDozOWM1MzQ1YWU2N2I4YWQ3MThhZA==",
@@ -56,7 +56,7 @@ ENDPOINTS = [
     },
     {
         "name": "IDLE",
-        "url": "http://localhost:5000/idle-data",
+        "url": "http://127.0.0.1:5000/idle-data",
         "config": {
             "app_id": "6",
             "token": "v2:MDAwMDAyODkwMDozOWM1MzQ1YWU2N2I4YWQ3MThhZA==",
@@ -68,7 +68,7 @@ ENDPOINTS = [
     },
     {
         "name": "AWH",
-        "url": "http://localhost:5000/awh-data",
+        "url": "http://127.0.0.1:5000/awh-data",
         "config": {
             "app_id": "6",
             "token": "v2:MDAwMDAyODkwMDozOWM1MzQ1YWU2N2I4YWQ3MThhZA==",
@@ -80,7 +80,7 @@ ENDPOINTS = [
     },
     {
         "name": "WH",
-        "url": "http://localhost:5000/wh-data",
+        "url": "http://127.0.0.1:5000/wh-data",
         "config": {
             "app_id": "6",
             "token": "v2:MDAwMDAyODkwMDozOWM1MzQ1YWU2N2I4YWQ3MThhZA==",
@@ -92,7 +92,7 @@ ENDPOINTS = [
     },
     {
         "name": "HA",
-        "url": "http://localhost:5000/ha-data",
+        "url": "http://127.0.0.1:5000/ha-data",
         "config": {
             "app_id": "6",
             "token": "v2:MDAwMDAyODkwMDozOWM1MzQ1YWU2N2I4YWQ3MThhZA==",
@@ -104,7 +104,7 @@ ENDPOINTS = [
     },
     {
         "name": "HB",
-        "url": "http://localhost:5000/hb-data",
+        "url": "http://127.0.0.1:5000/hb-data",
         "config": {
             "app_id": "6",
             "token": "v2:MDAwMDAyODkwMDozOWM1MzQ1YWU2N2I4YWQ3MThhZA==",
@@ -116,7 +116,7 @@ ENDPOINTS = [
     },
     {
         "name": "WU",
-        "url": "http://localhost:5000/wu-data",
+        "url": "http://127.0.0.1:5000/wu-data",
         "config": {
             "app_id": "6",
             "token": "v2:MDAwMDAyODkwMDozOWM1MzQ1YWU2N2I4YWQ3MThhZA==",
@@ -133,7 +133,7 @@ print("Waiting for Flask server...\n")
 # Try to connect to Flask
 for attempt in range(5):
     try:
-        requests.get("http://localhost:5000/", timeout=2)
+        requests.get("http://127.0.0.1:5000/", timeout=2)
         print("[OK] Flask server is running\n")
         break
     except:

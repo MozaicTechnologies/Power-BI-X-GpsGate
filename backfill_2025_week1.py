@@ -372,11 +372,18 @@ for idx, ep in enumerate(ENDPOINTS, start=1):
 
             accounting = result.get("accounting", {})
 
+            # print("[RESULT]")
+            # print(f"  Raw fetched: {accounting.get('raw_fetched', 0)}")
+            # print(f"  Internal dupes removed: {accounting.get('internal_dupes_removed', 0)}")
+            # print(f"  DB duplicates flagged: {accounting.get('db_duplicates_flagged', 0)}")
+            # print(f"  Inserted: {accounting.get('total_inserted', 0)}")
+
             print("[RESULT]")
-            print(f"  Raw fetched: {accounting.get('raw_fetched', 0)}")
-            print(f"  Internal dupes removed: {accounting.get('internal_dupes_removed', 0)}")
-            print(f"  DB duplicates flagged: {accounting.get('db_duplicates_flagged', 0)}")
-            print(f"  Inserted: {accounting.get('total_inserted', 0)}")
+            print(f"  Raw fetched: {accounting.get('raw', 0)}")
+            print(f"  Inserted: {accounting.get('inserted', 0)}")
+            print(f"  Skipped: {accounting.get('skipped', 0)}")
+            print(f"  Failed: {accounting.get('failed', 0)}")
+
 
         except Exception as e:
             print("[ERROR] Backfill failed")
