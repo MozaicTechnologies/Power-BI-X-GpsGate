@@ -7,9 +7,11 @@ from flask import Blueprint, render_template_string, jsonify, request
 from datetime import datetime, timedelta
 import traceback
 import threading
+import json
 from models import db, JobExecution, FactTrip, FactSpeeding, FactIdle, FactAWH, FactWH, FactHA, FactHB, FactWU
 from data_pipeline import process_event_data
 from logger_config import get_logger
+from config import Config
 
 logger = get_logger(__name__)
 
@@ -17,6 +19,56 @@ dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/dashboard')
 
 # Store active job threads
 active_jobs = {}
+
+# Event type to API configuration mapping
+EVENT_CONFIG = {
+    'Trip': {'report_id': '1225', 'event_id': None, 'response_key': 'Trip'},
+    'Speeding': {'report_id': '25', 'event_id': '6', 'response_key': 'Speeding'},
+    'Idle': {'report_id': '25', 'event_id': '4', 'response_key': 'Idle'},
+    'AWH': {'report_id': '25', 'event_id': '8', 'response_key': 'AWH'},
+    'WH': {'report_id': '25', 'event_id': '9', 'response_key': 'WH'},
+    'HA': {'report_id': '25', 'event_id': '26', 'response_key': 'HA'},
+    'HB': {'report_id': '25', 'event_id': '27', 'response_key': 'HB'},
+    'WU': {'report_id': '25', 'event_id': '21', 'response_key': 'WU'}
+}
+
+
+def process_event_with_dates(app, event_type, start_date, end_date):
+    """
+    Helper function to process event data for a specific date range.
+    Creates Flask request context with proper payload.
+    """
+    if event_type not in EVENT_CONFIG:
+        raise ValueError(f"Unknown event type: {event_type}")
+    
+    config = EVENT_CONFIG[event_type]
+    
+    # Prepare payload matching process_event_data signature
+    payload = {
+        "app_id": "1",
+        "token": Config.TOKEN,
+        "base_url": Config.BASE_URL,
+        "report_id": config['report_id'],
+        "tag_id": "1",
+        "period_start": f"{start_date}T00:00:00Z",
+        "period_end": f"{end_date}T23:59:59Z"
+    }
+    
+    if config['event_id']:
+        payload["event_id"] = config['event_id']
+    
+    # Call process_event_data within Flask request context
+    with app.test_request_context(
+        '/api/process',
+        method='POST',
+        data=json.dumps(payload),
+        content_type='application/json'
+    ):
+        return process_event_data(
+            event_name=event_type,
+            response_key=config['response_key']
+        )
+
 
 # ------------------------------------------------------------------
 # MANUAL JOB EXECUTORS (Run in background threads)
@@ -73,7 +125,8 @@ def execute_fact_sync_job(job_id, start_date, end_date):
             
             for event_type in event_types:
                 try:
-                    result = process_event_data(
+                    result = process_event_with_dates(
+                        app=app,
                         event_type=event_type,
                         start_date=start_date,
                         end_date=end_date
@@ -129,7 +182,8 @@ def execute_full_backfill_job(job_id, start_date, end_date):
             
             for event_type in event_types:
                 try:
-                    result = process_event_data(
+                    result = process_event_with_dates(
+                        app=app,
                         event_type=event_type,
                         start_date=start_date,
                         end_date=end_date
@@ -751,6 +805,26 @@ def dashboard_page():
                         <div class="stat-value" id="idle-count">-</div>
                         <div class="stat-label">Idle</div>
                     </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="awh-count">-</div>
+                        <div class="stat-label">AWH</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="wh-count">-</div>
+                        <div class="stat-label">WH</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="ha-count">-</div>
+                        <div class="stat-label">HA</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="hb-count">-</div>
+                        <div class="stat-label">HB</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="wu-count">-</div>
+                        <div class="stat-label">WU</div>
+                    </div>
                 </div>
                 <button onclick="refreshStats()" style="margin-top: 15px;">
                     🔄 Refresh Stats
@@ -879,6 +953,11 @@ def dashboard_page():
                     document.getElementById('trip-count').textContent = data.counts.Trip.toLocaleString();
                     document.getElementById('speeding-count').textContent = data.counts.Speeding.toLocaleString();
                     document.getElementById('idle-count').textContent = data.counts.Idle.toLocaleString();
+                    document.getElementById('awh-count').textContent = data.counts.AWH.toLocaleString();
+                    document.getElementById('wh-count').textContent = data.counts.WH.toLocaleString();
+                    document.getElementById('ha-count').textContent = data.counts.HA.toLocaleString();
+                    document.getElementById('hb-count').textContent = data.counts.HB.toLocaleString();
+                    document.getElementById('wu-count').textContent = data.counts.WU.toLocaleString();
                 }
             } catch (error) {
                 console.error('Failed to refresh stats:', error);

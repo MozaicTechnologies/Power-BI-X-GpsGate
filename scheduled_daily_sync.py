@@ -72,7 +72,8 @@ def run_daily_sync():
                 logger.info(f"📊 Processing {event_type}...")
                 
                 try:
-                    result = process_event_data(
+                    result = process_event_with_dates(
+                        app=app,
                         event_type=event_type,
                         start_date=start_date,
                         end_date=end_date
