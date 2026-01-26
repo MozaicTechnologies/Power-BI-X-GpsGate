@@ -307,6 +307,8 @@ def render_report():
             last_body = resp.text
 
             print(f"[RENDER] Attempt {attempt}: Status {resp.status_code}")
+            if not resp.ok:
+                print(f"[RENDER] Error response: {resp.text[:500]}")
 
             if resp.ok:
                 data = resp.json() if resp.text else {}
@@ -338,6 +340,7 @@ def render_report():
             time.sleep(1.5 * attempt)
 
     print(f"[RENDER] Failed after retries. Status: {last_status}")
+    print(f"[RENDER] Response body: {last_body[:1000] if last_body else 'None'}")
     return jsonify({
         "ok": False,
         "error": "Render failed",
