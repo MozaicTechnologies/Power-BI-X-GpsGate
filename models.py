@@ -466,7 +466,7 @@ class JobExecution(db.Model):
     errors = db.Column(db.Integer, default=0)
     
     error_message = db.Column(db.Text)
-    metadata = db.Column(db.JSON)  # Store job-specific data (date ranges, results, etc.)
+    job_metadata = db.Column(db.JSON)  # Store job-specific data (date ranges, results, etc.)
     
     triggered_by = db.Column(db.String(100))  # 'scheduler', 'manual', 'api'
     
@@ -486,6 +486,6 @@ class JobExecution(db.Model):
             'records_processed': self.records_processed,
             'errors': self.errors,
             'error_message': self.error_message,
-            'metadata': self.metadata,
+            'metadata': self.job_metadata,
             'triggered_by': self.triggered_by
         }

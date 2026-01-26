@@ -39,7 +39,7 @@ def execute_dimension_sync_job(job_id):
             job.status = 'completed'
             job.completed_at = datetime.utcnow()
             job.records_processed = 0  # sync_dimensions_from_api doesn't return count
-            job.metadata = {'message': 'Dimension sync completed from GpsGate API'}
+            job.job_metadata = {'message': 'Dimension sync completed from GpsGate API'}
             db.session.commit()
             
             logger.info(f"✅ Dimension sync completed")
@@ -49,7 +49,7 @@ def execute_dimension_sync_job(job_id):
             job.status = 'failed'
             job.completed_at = datetime.utcnow()
             job.error_message = str(e)
-            job.metadata = {'traceback': traceback.format_exc()}
+            job.job_metadata = {'traceback': traceback.format_exc()}
             db.session.commit()
         finally:
             if job_id in active_jobs:
@@ -89,7 +89,7 @@ def execute_fact_sync_job(job_id, start_date, end_date):
             job.completed_at = datetime.utcnow()
             job.records_processed = total_inserted
             job.errors = total_failed
-            job.metadata = {'results': results, 'start_date': start_date, 'end_date': end_date}
+            job.job_metadata = {'results': results, 'start_date': start_date, 'end_date': end_date}
             db.session.commit()
             
             logger.info(f"✅ Fact sync completed: {total_inserted} inserted, {total_failed} failed")
@@ -99,7 +99,7 @@ def execute_fact_sync_job(job_id, start_date, end_date):
             job.status = 'failed'
             job.completed_at = datetime.utcnow()
             job.error_message = str(e)
-            job.metadata = {'traceback': traceback.format_exc()}
+            job.job_metadata = {'traceback': traceback.format_exc()}
             db.session.commit()
         finally:
             if job_id in active_jobs:
@@ -145,7 +145,7 @@ def execute_full_backfill_job(job_id, start_date, end_date):
             job.completed_at = datetime.utcnow()
             job.records_processed = total_inserted
             job.errors = total_failed
-            job.metadata = {
+            job.job_metadata = {
                 'dimensions': 'synced from GpsGate API',
                 'facts': results,
                 'start_date': start_date,
@@ -160,7 +160,7 @@ def execute_full_backfill_job(job_id, start_date, end_date):
             job.status = 'failed'
             job.completed_at = datetime.utcnow()
             job.error_message = str(e)
-            job.metadata = {'traceback': traceback.format_exc()}
+            job.job_metadata = {'traceback': traceback.format_exc()}
             db.session.commit()
         finally:
             if job_id in active_jobs:
@@ -426,6 +426,41 @@ def get_last_sync_stats():
         
     except Exception as e:
         logger.error(f"Failed to get last sync stats: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@dashboard_bp.route('/stats/scheduler-status', methods=['GET'])
+def get_scheduler_status():
+    """Get recent scheduled job executions (daily_sync and weekly_backfill)"""
+    try:
+        # Get last 10 daily syncs
+        daily_syncs = JobExecution.query.filter_by(
+            job_type='daily_sync'
+        ).order_by(JobExecution.started_at.desc()).limit(10).all()
+        
+        # Get last 10 weekly backfills
+        weekly_backfills = JobExecution.query.filter_by(
+            job_type='weekly_backfill'
+        ).order_by(JobExecution.started_at.desc()).limit(10).all()
+        
+        # Get any currently running scheduled jobs
+        running_jobs = JobExecution.query.filter(
+            JobExecution.job_type.in_(['daily_sync', 'weekly_backfill']),
+            JobExecution.status == 'running'
+        ).all()
+        
+        return jsonify({
+            'success': True,
+            'daily_syncs': [job.to_dict() for job in daily_syncs],
+            'weekly_backfills': [job.to_dict() for job in weekly_backfills],
+            'running_jobs': [job.to_dict() for job in running_jobs]
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to get scheduler status: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)
@@ -728,6 +763,24 @@ def dashboard_page():
                 <div id="last-sync-info">Loading...</div>
             </div>
             
+            <!-- Scheduler Status -->
+            <div class="card" style="grid-column: 1 / -1;">
+                <h2>🕐 Automated Scheduler Status</h2>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                    <div>
+                        <h3 style="color: #667eea; margin-bottom: 10px;">Daily Sync (2 AM UTC)</h3>
+                        <div id="daily-scheduler-status">Loading...</div>
+                    </div>
+                    <div>
+                        <h3 style="color: #667eea; margin-bottom: 10px;">Weekly Backfill (Sunday 3 AM UTC)</h3>
+                        <div id="weekly-scheduler-status">Loading...</div>
+                    </div>
+                </div>
+                <button onclick="refreshSchedulerStatus()" style="margin-top: 15px;">
+                    🔄 Refresh Scheduler Status
+                </button>
+            </div>
+            
             <!-- Recent Jobs -->
             <div class="card" style="grid-column: 1 / -1;">
                 <h2>📋 Recent Jobs</h2>
@@ -880,6 +933,51 @@ def dashboard_page():
             }
         }
         
+        async function refreshSchedulerStatus() {
+            try {
+                const response = await fetch('/dashboard/stats/scheduler-status');
+                const data = await response.json();
+                if (data.success) {
+                    // Daily syncs
+                    const dailyDiv = document.getElementById('daily-scheduler-status');
+                    if (data.daily_syncs.length > 0) {
+                        dailyDiv.innerHTML = data.daily_syncs.slice(0, 5).map(job => `
+                            <div style="padding: 8px; margin: 5px 0; background: ${job.status === 'completed' ? '#d4edda' : job.status === 'failed' ? '#f8d7da' : '#fff3cd'}; border-radius: 4px; font-size: 0.9rem;">
+                                <strong>${new Date(job.started_at).toLocaleString()}</strong>
+                                <span style="float: right; font-weight: 600; color: ${job.status === 'completed' ? '#28a745' : job.status === 'failed' ? '#dc3545' : '#ffc107'};">${job.status.toUpperCase()}</span><br>
+                                ${job.records_processed ? `Records: ${job.records_processed.toLocaleString()}` : ''}
+                                ${job.error_message ? `<br>Error: ${job.error_message}` : ''}
+                            </div>
+                        `).join('');
+                    } else {
+                        dailyDiv.innerHTML = '<em style="color: #666;">No daily syncs yet</em>';
+                    }
+                    
+                    // Weekly backfills
+                    const weeklyDiv = document.getElementById('weekly-scheduler-status');
+                    if (data.weekly_backfills.length > 0) {
+                        weeklyDiv.innerHTML = data.weekly_backfills.slice(0, 5).map(job => `
+                            <div style="padding: 8px; margin: 5px 0; background: ${job.status === 'completed' ? '#d4edda' : job.status === 'failed' ? '#f8d7da' : '#fff3cd'}; border-radius: 4px; font-size: 0.9rem;">
+                                <strong>${new Date(job.started_at).toLocaleString()}</strong>
+                                <span style="float: right; font-weight: 600; color: ${job.status === 'completed' ? '#28a745' : job.status === 'failed' ? '#dc3545' : '#ffc107'};">${job.status.toUpperCase()}</span><br>
+                                ${job.records_processed ? `Records: ${job.records_processed.toLocaleString()}` : ''}
+                                ${job.error_message ? `<br>Error: ${job.error_message}` : ''}
+                            </div>
+                        `).join('');
+                    } else {
+                        weeklyDiv.innerHTML = '<em style="color: #666;">No weekly backfills yet</em>';
+                    }
+                    
+                    // Show alert if any scheduler jobs are running
+                    if (data.running_jobs.length > 0) {
+                        console.log('Scheduler jobs currently running:', data.running_jobs.length);
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to refresh scheduler status:', error);
+            }
+        }
+        
         function showMessage(type, text) {
             const msg = document.getElementById('trigger-message');
             msg.className = 'message ' + type;
@@ -894,9 +992,11 @@ def dashboard_page():
         refreshStats();
         refreshJobs();
         refreshLastSync();
+        refreshSchedulerStatus();
         
         setInterval(refreshJobs, 5000);  // Refresh jobs every 5 seconds
         setInterval(refreshStats, 30000);  // Refresh stats every 30 seconds
+        setInterval(refreshSchedulerStatus, 10000);  // Refresh scheduler status every 10 seconds
     </script>
 </body>
 </html>

@@ -112,7 +112,7 @@ def run_weekly_backfill():
             job.completed_at = datetime.utcnow()
             job.records_processed = total_inserted
             job.errors = total_failed
-            job.metadata = {
+            job.job_metadata = {
                 'start_date': start_str,
                 'end_date': end_str,
                 'total_skipped': total_skipped,
@@ -144,7 +144,7 @@ def run_weekly_backfill():
             job.status = 'failed'
             job.completed_at = datetime.utcnow()
             job.error_message = str(e)
-            job.metadata = {'traceback': traceback.format_exc()}
+            job.job_metadata = {'traceback': traceback.format_exc()}
             db.session.commit()
             
             return {

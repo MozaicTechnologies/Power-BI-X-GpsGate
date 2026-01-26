@@ -107,7 +107,7 @@ def run_daily_sync():
             job.completed_at = datetime.utcnow()
             job.records_processed = total_inserted
             job.errors = total_failed
-            job.metadata = results
+            job.job_metadata = results
             db.session.commit()
             
             logger.info(
@@ -131,7 +131,7 @@ def run_daily_sync():
             job.status = 'failed'
             job.completed_at = datetime.utcnow()
             job.error_message = str(e)
-            job.metadata = {'traceback': traceback.format_exc()}
+            job.job_metadata = {'traceback': traceback.format_exc()}
             db.session.commit()
             
             return {
