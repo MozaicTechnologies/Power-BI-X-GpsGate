@@ -451,11 +451,23 @@ def get_table_counts():
             'WU': db.session.query(FactWU).count(),
         }
         
-        dim_counts = {
-            'DimUser': db.session.query(DimUser).count(),
-            'DimTag': db.session.query(DimTag).count(),
-            'DimEventRule': db.session.query(DimEventRule).count(),
-        }
+        # Dimension tables don't have models, use raw SQL
+        dim_counts = {}
+        dim_tables = [
+            ('dim_drivers', 'Drivers'),
+            ('dim_vehicles', 'Vehicles'),
+            ('dim_tags', 'Tags'),
+            ('dim_reports', 'Reports'),
+            ('dim_event_rules', 'EventRules'),
+            ('dim_vehicle_custom_fields', 'CustomFields')
+        ]
+        
+        for table_name, key in dim_tables:
+            try:
+                result = db.session.execute(db.text(f"SELECT COUNT(*) FROM {table_name}"))
+                dim_counts[key] = result.scalar()
+            except Exception:
+                dim_counts[key] = 0
         
         total = sum(fact_counts.values())
         
@@ -849,16 +861,28 @@ def dashboard_page():
                 <h3 style="color: #764ba2; margin: 20px 0 10px 0; font-size: 1.1em;">Dimension Tables</h3>
                 <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));">
                     <div class="stat-item">
-                        <div class="stat-value" id="dimuser-count">-</div>
-                        <div class="stat-label">Users</div>
+                        <div class="stat-value" id="dim-drivers-count">-</div>
+                        <div class="stat-label">Drivers</div>
                     </div>
                     <div class="stat-item">
-                        <div class="stat-value" id="dimtag-count">-</div>
+                        <div class="stat-value" id="dim-vehicles-count">-</div>
+                        <div class="stat-label">Vehicles</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="dim-tags-count">-</div>
                         <div class="stat-label">Tags/Groups</div>
                     </div>
                     <div class="stat-item">
-                        <div class="stat-value" id="dimevent-count">-</div>
+                        <div class="stat-value" id="dim-reports-count">-</div>
+                        <div class="stat-label">Reports</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="dim-eventrules-count">-</div>
                         <div class="stat-label">Event Rules</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="dim-customfields-count">-</div>
+                        <div class="stat-label">Custom Fields</div>
                     </div>
                 </div>
                 <button onclick="refreshStats()" style="margin-top: 15px;">
@@ -997,9 +1021,12 @@ def dashboard_page():
                     
                     // Dimension tables
                     if (data.dim_counts) {
-                        document.getElementById('dimuser-count').textContent = data.dim_counts.DimUser.toLocaleString();
-                        document.getElementById('dimtag-count').textContent = data.dim_counts.DimTag.toLocaleString();
-                        document.getElementById('dimevent-count').textContent = data.dim_counts.DimEventRule.toLocaleString();
+                        document.getElementById('dim-drivers-count').textContent = data.dim_counts.Drivers.toLocaleString();
+                        document.getElementById('dim-vehicles-count').textContent = data.dim_counts.Vehicles.toLocaleString();
+                        document.getElementById('dim-tags-count').textContent = data.dim_counts.Tags.toLocaleString();
+                        document.getElementById('dim-reports-count').textContent = data.dim_counts.Reports.toLocaleString();
+                        document.getElementById('dim-eventrules-count').textContent = data.dim_counts.EventRules.toLocaleString();
+                        document.getElementById('dim-customfields-count').textContent = data.dim_counts.CustomFields.toLocaleString();
                     }
                 }
             } catch (error) {
