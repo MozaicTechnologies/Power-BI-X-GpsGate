@@ -230,86 +230,46 @@
 
 
 
-# render.py (UPDATED)
-# routes/render.py
-
 import time
 import requests
 from flask import Blueprint, request, jsonify
 
-from flask import Blueprint
-
 render_bp = Blueprint("render", __name__)
+
+DEFAULT_TIMEOUT = 45
 
 @render_bp.route("/health")
 def health():
     return "ok"
 
-DEFAULT_TIMEOUT = 45
-
-
-def _auth_header(token: str) -> dict:
-    token = (token or "").strip()
-    if not token:
-        return {}
-    return {"Authorization": token if token.lower().startswith("bearer ") else f"Bearer {token}"}
-
-
-def _normalize_base_url(base_url: str) -> str:
-    base_url = (base_url or "").strip().rstrip("/")
-    return base_url
-
-
-def _as_str_list(value):
-    """
-    Accepts:
-      - 39
-      - "39"
-      - "39,40,41"
-      - [39, "40", 41]
-    Returns: ["39", "40", "41"]
-    """
-    if value is None or value == "":
-        return []
-
-    if isinstance(value, (list, tuple, set)):
-        items = list(value)
-    else:
-        # if string with commas => split
-        if isinstance(value, str) and "," in value:
-            items = [x.strip() for x in value.split(",") if x.strip()]
-        else:
-            items = [value]
-
-    out = []
-    for x in items:
-        if x is None or x == "":
-            continue
-        out.append(str(x).strip())
-    return out
-
-
-@render_bp.post("/render")
+@render_bp.route("/render", methods=["POST"])
 def render_report():
-    payload = request.get_json(force=True) or {}
+    """Handle render requests - accepts form data or JSON"""
+    # Accept both JSON and form data
+    if request.is_json:
+        payload = request.get_json()
+    else:
+        payload = request.form.to_dict()
+
+    print(f"[RENDER] Received payload keys: {sorted(list(payload.keys()))}")
 
     # Required fields
-    base_url = _normalize_base_url(payload.get("base_url"))
+    base_url = (payload.get("base_url") or "").strip().rstrip("/")
     app_id = payload.get("app_id")
     report_id = payload.get("report_id")
     token = payload.get("token")
-
     period_start = payload.get("period_start")
     period_end = payload.get("period_end")
+    
+    # Optional
+    tag_id = payload.get("tag_id")
+    event_id = payload.get("event_id")
 
-    # Optional selectors (these are the ones breaking today because they were ints)
-    tag_ids = _as_str_list(payload.get("tag_id"))
-    event_ids = _as_str_list(payload.get("event_id"))
-
-    if not base_url or app_id is None or report_id is None or not token:
+    if not all([base_url, app_id, report_id, token]):
         return jsonify({
             "ok": False,
-            "error": "Missing required fields: base_url, app_id, report_id, token"
+            "error": "Missing required fields: base_url, app_id, report_id, token",
+            "received": sorted(list(payload.keys()))
         }), 400
 
     url = f"{base_url}/comGpsGate/api/v.1/applications/{app_id}/reports/{report_id}/renderings"
@@ -317,22 +277,26 @@ def render_report():
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json",
-        **_auth_header(token)
+        "Authorization": token
     }
 
-    # ---- IMPORTANT: force IDs into string arrays ----
     body = {
         "periodStart": period_start,
         "periodEnd": period_end,
+        "reportFormatId": 2,
+        "sendEmail": False
     }
+    
+    # Add optional parameters if provided
+    if tag_id:
+        body["tagId"] = str(tag_id)
+    if event_id:
+        body["eventId"] = str(event_id)
 
-    # These keys are safe: if API doesn't use them, it ignores; if it uses them, it now receives strings.
-    if tag_ids:
-        body["tags"] = tag_ids            # MUST be List<string>
-    if event_ids:
-        body["events"] = event_ids        # MUST be List<string>
+    print(f"[RENDER] Posting to: {url}")
+    print(f"[RENDER] Body: {body}")
 
-    # Retry with backoff (same style you have)
+    # Retry with backoff
     last_status = None
     last_body = None
 
@@ -342,6 +306,8 @@ def render_report():
             last_status = resp.status_code
             last_body = resp.text
 
+            print(f"[RENDER] Attempt {attempt}: Status {resp.status_code}")
+
             if resp.ok:
                 data = resp.json() if resp.text else {}
                 rendering_id = (
@@ -350,31 +316,31 @@ def render_report():
                     or data.get("rendering_id")
                 )
 
+                print(f"[RENDER] Success! rendering_id={rendering_id}")
+
                 return jsonify({
-                    "ok": True,
-                    "attempt": attempt,
-                    "status": resp.status_code,
+                    "render_id": rendering_id,
                     "rendering_id": rendering_id,
-                    "raw": data
+                    "ok": True
                 }), 200
 
-            # 4xx/5xx => retry only on transient errors
+            # Retry on transient errors
             if resp.status_code in (429, 500, 502, 503, 504):
                 time.sleep(1.5 * attempt)
                 continue
 
-            # non-retryable
+            # Non-retryable error
             break
 
         except Exception as e:
             last_body = str(e)
+            print(f"[RENDER] Attempt {attempt} exception: {e}")
             time.sleep(1.5 * attempt)
 
+    print(f"[RENDER] Failed after retries. Status: {last_status}")
     return jsonify({
         "ok": False,
-        "status": last_status,
         "error": "Render failed",
-        "gpsgate_body": last_body,
-        "sent_body": body,   # useful for debugging
-        "sent_url": url
+        "status": last_status,
+        "response": last_body[:500] if last_body else None
     }), 502
