@@ -45,7 +45,7 @@ def process_event_with_dates(app, event_type, start_date, end_date):
     
     # Prepare payload matching process_event_data signature
     payload = {
-        "app_id": "1",
+        "app_id": "6",
         "token": Config.TOKEN,
         "base_url": Config.BASE_URL,
         "report_id": config['report_id'],
