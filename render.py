@@ -274,6 +274,10 @@ def render_report():
 
     url = f"{base_url}/comGpsGate/api/v.1/applications/{app_id}/reports/{report_id}/renderings"
 
+    # Debug: Log token info (masked)
+    token_preview = f"{token[:10]}...{token[-10:]}" if len(token) > 20 else "SHORT_TOKEN"
+    print(f"[RENDER] Using token: {token_preview} (length: {len(token)})")
+    
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json",

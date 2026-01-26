@@ -81,3 +81,10 @@ class Config:
     print(f"[CONFIG] GDRIVE_FOLDER_ID: {GDRIVE_FOLDER_ID}")
     print(f"[CONFIG] GOOGLE_APPLICATION_CREDENTIALS: {'Set' if GOOGLE_APPLICATION_CREDENTIALS else 'Not set'}")
     print(f"[CONFIG] SECRET_KEY: {'Set' if SECRET_KEY else 'Using default'}")
+    
+    # Debug TOKEN (masked for security)
+    if TOKEN:
+        token_preview = f"{TOKEN[:10]}...{TOKEN[-10:]}" if len(TOKEN) > 20 else "SHORT_TOKEN"
+        print(f"[CONFIG] TOKEN: {token_preview} (length: {len(TOKEN)})")
+    else:
+        print(f"[CONFIG] TOKEN: NOT SET!")
