@@ -438,9 +438,9 @@ def get_recent_jobs():
 
 @dashboard_bp.route('/stats/table-counts', methods=['GET'])
 def get_table_counts():
-    """Get record counts for all fact tables"""
+    """Get record counts for all fact and dimension tables"""
     try:
-        counts = {
+        fact_counts = {
             'Trip': db.session.query(FactTrip).count(),
             'Speeding': db.session.query(FactSpeeding).count(),
             'Idle': db.session.query(FactIdle).count(),
@@ -451,11 +451,18 @@ def get_table_counts():
             'WU': db.session.query(FactWU).count(),
         }
         
-        total = sum(counts.values())
+        dim_counts = {
+            'DimUser': db.session.query(DimUser).count(),
+            'DimTag': db.session.query(DimTag).count(),
+            'DimEventRule': db.session.query(DimEventRule).count(),
+        }
+        
+        total = sum(fact_counts.values())
         
         return jsonify({
             'success': True,
-            'counts': counts,
+            'counts': fact_counts,
+            'dim_counts': dim_counts,
             'total': total,
             'timestamp': datetime.utcnow().isoformat()
         })
@@ -800,6 +807,7 @@ def dashboard_page():
             <!-- Live Statistics -->
             <div class="card">
                 <h2>📈 Live Statistics</h2>
+                <h3 style="color: #667eea; margin-bottom: 10px; font-size: 1.1em;">Fact Tables</h3>
                 <div class="stats-grid" id="stats-grid">
                     <div class="stat-item">
                         <div class="stat-value" id="total-count">-</div>
@@ -836,6 +844,21 @@ def dashboard_page():
                     <div class="stat-item">
                         <div class="stat-value" id="wu-count">-</div>
                         <div class="stat-label">WU</div>
+                    </div>
+                </div>
+                <h3 style="color: #764ba2; margin: 20px 0 10px 0; font-size: 1.1em;">Dimension Tables</h3>
+                <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));">
+                    <div class="stat-item">
+                        <div class="stat-value" id="dimuser-count">-</div>
+                        <div class="stat-label">Users</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="dimtag-count">-</div>
+                        <div class="stat-label">Tags/Groups</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="dimevent-count">-</div>
+                        <div class="stat-label">Event Rules</div>
                     </div>
                 </div>
                 <button onclick="refreshStats()" style="margin-top: 15px;">
@@ -961,6 +984,7 @@ def dashboard_page():
                 const response = await fetch('/dashboard/stats/table-counts');
                 const data = await response.json();
                 if (data.success) {
+                    // Fact tables
                     document.getElementById('total-count').textContent = data.total.toLocaleString();
                     document.getElementById('trip-count').textContent = data.counts.Trip.toLocaleString();
                     document.getElementById('speeding-count').textContent = data.counts.Speeding.toLocaleString();
@@ -970,6 +994,13 @@ def dashboard_page():
                     document.getElementById('ha-count').textContent = data.counts.HA.toLocaleString();
                     document.getElementById('hb-count').textContent = data.counts.HB.toLocaleString();
                     document.getElementById('wu-count').textContent = data.counts.WU.toLocaleString();
+                    
+                    // Dimension tables
+                    if (data.dim_counts) {
+                        document.getElementById('dimuser-count').textContent = data.dim_counts.DimUser.toLocaleString();
+                        document.getElementById('dimtag-count').textContent = data.dim_counts.DimTag.toLocaleString();
+                        document.getElementById('dimevent-count').textContent = data.dim_counts.DimEventRule.toLocaleString();
+                    }
                 }
             } catch (error) {
                 console.error('Failed to refresh stats:', error);
