@@ -70,10 +70,22 @@ def process_event_with_dates(app, event_type, start_date, end_date):
         data=json.dumps(payload),
         content_type='application/json'
     ):
-        return process_event_data(
+        # process_event_data returns (jsonify(...), status_code) tuple
+        response_tuple = process_event_data(
             event_name=event_type,
             response_key=config['response_key']
         )
+        
+        # Extract the response object and JSON data
+        if isinstance(response_tuple, tuple):
+            response_obj, status_code = response_tuple
+            # Get JSON data from response object
+            data = response_obj.get_json()
+            # Return the accounting/totals data
+            return data.get('accounting', {})
+        else:
+            # In case it's not a tuple (shouldn't happen, but safe fallback)
+            return response_tuple
 
 
 def run_weekly_backfill():

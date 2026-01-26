@@ -7,6 +7,7 @@ Syncs dimension tables and yesterday's fact data
 
 import sys
 import os
+import json
 from datetime import datetime, timedelta
 import traceback
 from dotenv import load_dotenv
@@ -21,8 +22,71 @@ from application import create_app, db
 from models import JobExecution
 from logger_config import get_logger
 from data_pipeline import process_event_data
+from config import Config
 
 logger = get_logger(__name__)
+
+# Event type to API configuration mapping
+EVENT_CONFIG = {
+    'Trip': {'report_id': '1225', 'event_id': None, 'response_key': 'Trip'},
+    'Speeding': {'report_id': '25', 'event_id': '6', 'response_key': 'Speeding'},
+    'Idle': {'report_id': '25', 'event_id': '4', 'response_key': 'Idle'},
+    'AWH': {'report_id': '25', 'event_id': '8', 'response_key': 'AWH'},
+    'WH': {'report_id': '25', 'event_id': '9', 'response_key': 'WH'},
+    'HA': {'report_id': '25', 'event_id': '26', 'response_key': 'HA'},
+    'HB': {'report_id': '25', 'event_id': '27', 'response_key': 'HB'},
+    'WU': {'report_id': '25', 'event_id': '21', 'response_key': 'WU'}
+}
+
+
+def process_event_with_dates(app, event_type, start_date, end_date):
+    """
+    Helper function to process event data for a specific date range.
+    Creates Flask request context with proper payload.
+    """
+    if event_type not in EVENT_CONFIG:
+        raise ValueError(f"Unknown event type: {event_type}")
+    
+    config = EVENT_CONFIG[event_type]
+    
+    # Prepare payload matching process_event_data signature
+    payload = {
+        "app_id": "1",
+        "token": Config.TOKEN,
+        "base_url": Config.BASE_URL,
+        "report_id": config['report_id'],
+        "tag_id": "1",
+        "period_start": f"{start_date}T00:00:00Z",
+        "period_end": f"{end_date}T23:59:59Z"
+    }
+    
+    if config['event_id']:
+        payload["event_id"] = config['event_id']
+    
+    # Call process_event_data within Flask request context
+    with app.test_request_context(
+        '/api/process',
+        method='POST',
+        data=json.dumps(payload),
+        content_type='application/json'
+    ):
+        # process_event_data returns (jsonify(...), status_code) tuple
+        response_tuple = process_event_data(
+            event_name=event_type,
+            response_key=config['response_key']
+        )
+        
+        # Extract the response object and JSON data
+        if isinstance(response_tuple, tuple):
+            response_obj, status_code = response_tuple
+            # Get JSON data from response object
+            data = response_obj.get_json()
+            # Return the accounting/totals data
+            return data.get('accounting', {})
+        else:
+            # In case it's not a tuple (shouldn't happen, but safe fallback)
+            return response_tuple
+
 
 def run_daily_sync():
     """
