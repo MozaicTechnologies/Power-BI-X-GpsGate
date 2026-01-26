@@ -438,20 +438,30 @@ def get_recent_jobs():
 
 @dashboard_bp.route('/stats/table-counts', methods=['GET'])
 def get_table_counts():
-    """Get record counts for all fact and dimension tables"""
+    """Get record counts for all fact and dimension tables (using raw SQL for accuracy)"""
     try:
-        fact_counts = {
-            'Trip': db.session.query(FactTrip).count(),
-            'Speeding': db.session.query(FactSpeeding).count(),
-            'Idle': db.session.query(FactIdle).count(),
-            'AWH': db.session.query(FactAWH).count(),
-            'WH': db.session.query(FactWH).count(),
-            'HA': db.session.query(FactHA).count(),
-            'HB': db.session.query(FactHB).count(),
-            'WU': db.session.query(FactWU).count(),
-        }
+        # Use raw SQL for fact tables to avoid inheritance issues
+        # (FactWH inherits from FactAWH, FactHB inherits from FactHA)
+        fact_tables = [
+            ('fact_trip', 'Trip'),
+            ('fact_speeding', 'Speeding'),
+            ('fact_idle', 'Idle'),
+            ('fact_awh', 'AWH'),
+            ('fact_wh', 'WH'),
+            ('fact_ha', 'HA'),
+            ('fact_hb', 'HB'),
+            ('fact_wu', 'WU'),
+        ]
         
-        # Dimension tables don't have models, use raw SQL
+        fact_counts = {}
+        for table_name, key in fact_tables:
+            try:
+                result = db.session.execute(db.text(f"SELECT COUNT(*) FROM {table_name}"))
+                fact_counts[key] = result.scalar()
+            except Exception:
+                fact_counts[key] = 0
+        
+        # Dimension tables
         dim_counts = {}
         dim_tables = [
             ('dim_drivers', 'Drivers'),
