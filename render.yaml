@@ -1,10 +1,37 @@
 services:
+  # Web Service - Flask API
   - type: web
     name: Power-BI-X-GpsGate
     env: python
     plan: standard
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn wsgi:app
+    startCommand: gunicorn wsgi:app --workers 2 --threads 4 --timeout 600 --log-level info
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.4
+      - key: GUNICORN_WORKERS
+        value: 2
+      - key: GUNICORN_THREADS
+        value: 4
+  
+  # Cron Job - Daily Sync (Every day at 2:00 AM UTC)
+  - type: cron
+    name: gpsgate-daily-sync
+    env: python
+    schedule: "0 2 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scheduled_daily_sync.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.4
+  
+  # Cron Job - Weekly Backfill (Every Sunday at 3:00 AM UTC)
+  - type: cron
+    name: gpsgate-weekly-backfill
+    env: python
+    schedule: "0 3 * * 0"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scheduled_weekly_backfill.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.13.4

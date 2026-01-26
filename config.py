@@ -69,6 +69,10 @@ class Config:
     
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
+    # GpsGate API settings
+    TOKEN = os.getenv("TOKEN")
+    BASE_URL = os.getenv("BASE_URL", "https://omantracking2.com")
+    
     # Google Drive settings from environment
     GDRIVE_FOLDER_ID = os.environ.get("GDRIVE_FOLDER_ID")
     GOOGLE_APPLICATION_CREDENTIALS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")

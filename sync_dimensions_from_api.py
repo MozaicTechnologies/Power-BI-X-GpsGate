@@ -299,9 +299,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-BASE_URL = "https://omantracking2.com"
+BASE_URL = os.getenv("BASE_URL", "https://omantracking2.com")
 APP_ID = 6
-AUTH_TOKEN = "v2:MDAwMDAyODkwMDozOWM1MzQ1YWU2N2I4YWQ3MThhZA=="
+AUTH_TOKEN = os.getenv("TOKEN")
 
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL missing")

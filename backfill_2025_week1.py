@@ -325,10 +325,15 @@ ENDPOINTS = [
     {"name": "WU", "key": "wu_events", "event_id": "17"},
 ]
 
+# Load environment variables
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
 COMMON_CONFIG = {
     "app_id": "6",
-    "token": "v2:MDAwMDAyODkwMDozOWM1MzQ1YWU2N2I4YWQ3MThhZA==",
-    "base_url": "https://omantracking2.com",
+    "token": os.getenv("TOKEN"),
+    "base_url": os.getenv("BASE_URL", "https://omantracking2.com"),
     "report_id": "25",
     "tag_id": "39",
 }

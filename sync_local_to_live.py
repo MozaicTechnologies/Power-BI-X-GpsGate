@@ -18,20 +18,26 @@ from sqlalchemy import create_engine, text
 load_dotenv()
 
 # ------------------------------------------------------------------
-# RENDER / LIVE DATABASE
+# RENDER / LIVE DATABASE (from environment)
 # ------------------------------------------------------------------
-# RENDER_HOST = "dpg-d3fvdvdfvfdas0-a.singapore-postgres.render.com"
-# RENDER_PORT = 5432
-# RENDER_USER = "powedfvdfvdfpostgre_user"
-# RENDER_PASSWORD = "EJzJUdfvdfvc8Eo1oBbt"
-# RENDER_DBNAME = "poweefererererpostgre"
+# Parse DATABASE_LIVE_URL from environment
+LIVE_DB_URL = os.getenv("DATABASE_LIVE_URL")
 
+if not LIVE_DB_URL:
+    raise RuntimeError("❌ DATABASE_LIVE_URL not set in environment variables!")
 
-RENDER_HOST = "dpg-d39587nfte5s73ci7as0-a.singapore-postgres.render.com"
-RENDER_PORT = 5432
-RENDER_USER = "powerbixgpsgatexgdriverpostgre_user"
-RENDER_PASSWORD = "EJzJUk7a8AGjr1BCxXslO1Pc8Eo1oBbt"
-RENDER_DBNAME = "powerbixgpsgatexgdriverpostgre"
+# Extract connection details from URL for psycopg3
+# Format: postgresql://user:password@host:port/database
+from urllib.parse import urlparse
+
+parsed = urlparse(LIVE_DB_URL)
+RENDER_HOST = parsed.hostname
+RENDER_PORT = parsed.port or 5432
+RENDER_USER = parsed.username
+RENDER_PASSWORD = parsed.password
+RENDER_DBNAME = parsed.path.lstrip('/')
+
+print(f"📊 Render database: {RENDER_HOST}/{RENDER_DBNAME}")
 
 # ------------------------------------------------------------------
 # LOCAL DATABASE

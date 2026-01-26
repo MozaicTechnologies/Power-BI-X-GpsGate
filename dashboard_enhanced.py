@@ -1,0 +1,904 @@
+"""
+Enhanced Dashboard with Manual Trigger Controls
+Provides live status monitoring and manual job execution
+"""
+
+from flask import Blueprint, render_template_string, jsonify, request
+from datetime import datetime, timedelta
+import traceback
+import threading
+from models import db, JobExecution, FactTrip, FactSpeeding, FactIdle, FactAWH, FactWH, FactHA, FactHB, FactWU
+from data_pipeline import process_event_data
+from logger_config import get_logger
+
+logger = get_logger(__name__)
+
+dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/dashboard')
+
+# Store active job threads
+active_jobs = {}
+
+# ------------------------------------------------------------------
+# MANUAL JOB EXECUTORS (Run in background threads)
+# ------------------------------------------------------------------
+
+def execute_dimension_sync_job(job_id):
+    """Execute dimension sync in background"""
+    from application import create_app
+    app = create_app()
+    
+    with app.app_context():
+        job = db.session.get(JobExecution, job_id)
+        try:
+            # Import dimension sync function
+            from sync_dimensions_from_api import main as sync_dimension_main
+            
+            logger.info(f"🚀 Starting dimension sync job {job_id}")
+            sync_dimension_main()  # Runs the sync
+            
+            job.status = 'completed'
+            job.completed_at = datetime.utcnow()
+            job.records_processed = 0  # sync_dimensions_from_api doesn't return count
+            job.metadata = {'message': 'Dimension sync completed from GpsGate API'}
+            db.session.commit()
+            
+            logger.info(f"✅ Dimension sync completed")
+            
+        except Exception as e:
+            logger.error(f"❌ Dimension sync failed: {str(e)}")
+            job.status = 'failed'
+            job.completed_at = datetime.utcnow()
+            job.error_message = str(e)
+            job.metadata = {'traceback': traceback.format_exc()}
+            db.session.commit()
+        finally:
+            if job_id in active_jobs:
+                del active_jobs[job_id]
+
+
+def execute_fact_sync_job(job_id, start_date, end_date):
+    """Execute fact table sync in background"""
+    from application import create_app
+    app = create_app()
+    
+    with app.app_context():
+        job = db.session.get(JobExecution, job_id)
+        try:
+            logger.info(f"🚀 Starting fact sync job {job_id}: {start_date} to {end_date}")
+            
+            event_types = ['Trip', 'Speeding', 'Idle', 'AWH', 'WH', 'HA', 'HB', 'WU']
+            results = {}
+            total_inserted = 0
+            total_failed = 0
+            
+            for event_type in event_types:
+                try:
+                    result = process_event_data(
+                        event_type=event_type,
+                        start_date=start_date,
+                        end_date=end_date
+                    )
+                    results[event_type] = result
+                    total_inserted += result.get('inserted', 0)
+                    total_failed += result.get('failed', 0)
+                except Exception as e:
+                    logger.error(f"❌ {event_type} failed: {str(e)}")
+                    results[event_type] = {'status': 'failed', 'error': str(e)}
+            
+            job.status = 'completed'
+            job.completed_at = datetime.utcnow()
+            job.records_processed = total_inserted
+            job.errors = total_failed
+            job.metadata = {'results': results, 'start_date': start_date, 'end_date': end_date}
+            db.session.commit()
+            
+            logger.info(f"✅ Fact sync completed: {total_inserted} inserted, {total_failed} failed")
+            
+        except Exception as e:
+            logger.error(f"❌ Fact sync failed: {str(e)}")
+            job.status = 'failed'
+            job.completed_at = datetime.utcnow()
+            job.error_message = str(e)
+            job.metadata = {'traceback': traceback.format_exc()}
+            db.session.commit()
+        finally:
+            if job_id in active_jobs:
+                del active_jobs[job_id]
+
+
+def execute_full_backfill_job(job_id, start_date, end_date):
+    """Execute full backfill (dimensions + facts) in background"""
+    from application import create_app
+    app = create_app()
+    
+    with app.app_context():
+        job = db.session.get(JobExecution, job_id)
+        try:
+            logger.info(f"🚀 Starting full backfill job {job_id}: {start_date} to {end_date}")
+            
+            # Step 1: Sync dimensions
+            from sync_dimensions_from_api import main as sync_dimension_main
+            sync_dimension_main()
+            logger.info(f"✅ Dimensions synced from API")
+            
+            # Step 2: Sync facts
+            event_types = ['Trip', 'Speeding', 'Idle', 'AWH', 'WH', 'HA', 'HB', 'WU']
+            results = {}
+            total_inserted = 0
+            total_failed = 0
+            
+            for event_type in event_types:
+                try:
+                    result = process_event_data(
+                        event_type=event_type,
+                        start_date=start_date,
+                        end_date=end_date
+                    )
+                    results[event_type] = result
+                    total_inserted += result.get('inserted', 0)
+                    total_failed += result.get('failed', 0)
+                except Exception as e:
+                    logger.error(f"❌ {event_type} failed: {str(e)}")
+                    results[event_type] = {'status': 'failed', 'error': str(e)}
+            
+            job.status = 'completed'
+            job.completed_at = datetime.utcnow()
+            job.records_processed = total_inserted
+            job.errors = total_failed
+            job.metadata = {
+                'dimensions': 'synced from GpsGate API',
+                'facts': results,
+                'start_date': start_date,
+                'end_date': end_date
+            }
+            db.session.commit()
+            
+            logger.info(f"✅ Full backfill completed: {total_inserted} inserted, {total_failed} failed")
+            
+        except Exception as e:
+            logger.error(f"❌ Full backfill failed: {str(e)}")
+            job.status = 'failed'
+            job.completed_at = datetime.utcnow()
+            job.error_message = str(e)
+            job.metadata = {'traceback': traceback.format_exc()}
+            db.session.commit()
+        finally:
+            if job_id in active_jobs:
+                del active_jobs[job_id]
+
+
+# ------------------------------------------------------------------
+# API ENDPOINTS
+# ------------------------------------------------------------------
+
+@dashboard_bp.route('/trigger/dimension-sync', methods=['POST'])
+def trigger_dimension_sync():
+    """Trigger manual dimension sync"""
+    try:
+        # Create job execution record
+        job = JobExecution(
+            job_type='manual_dimension_sync',
+            status='running',
+            started_at=datetime.utcnow(),
+            triggered_by='manual'
+        )
+        db.session.add(job)
+        db.session.commit()
+        
+        # Start background thread
+        thread = threading.Thread(target=execute_dimension_sync_job, args=(job.id,))
+        thread.daemon = True
+        thread.start()
+        
+        active_jobs[job.id] = thread
+        
+        return jsonify({
+            'success': True,
+            'job_id': job.id,
+            'message': 'Dimension sync started'
+        }), 202
+        
+    except Exception as e:
+        logger.error(f"Failed to trigger dimension sync: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@dashboard_bp.route('/trigger/fact-sync', methods=['POST'])
+def trigger_fact_sync():
+    """Trigger manual fact table sync"""
+    try:
+        data = request.get_json() or {}
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        
+        if not start_date or not end_date:
+            return jsonify({
+                'success': False,
+                'error': 'start_date and end_date are required'
+            }), 400
+        
+        # Validate date format
+        datetime.strptime(start_date, '%Y-%m-%d')
+        datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Create job execution record
+        job = JobExecution(
+            job_type='manual_fact_sync',
+            status='running',
+            started_at=datetime.utcnow(),
+            triggered_by='manual',
+            metadata={'start_date': start_date, 'end_date': end_date}
+        )
+        db.session.add(job)
+        db.session.commit()
+        
+        # Start background thread
+        thread = threading.Thread(
+            target=execute_fact_sync_job,
+            args=(job.id, start_date, end_date)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        active_jobs[job.id] = thread
+        
+        return jsonify({
+            'success': True,
+            'job_id': job.id,
+            'message': f'Fact sync started for {start_date} to {end_date}'
+        }), 202
+        
+    except ValueError as e:
+        return jsonify({
+            'success': False,
+            'error': 'Invalid date format. Use YYYY-MM-DD'
+        }), 400
+    except Exception as e:
+        logger.error(f"Failed to trigger fact sync: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@dashboard_bp.route('/trigger/full-backfill', methods=['POST'])
+def trigger_full_backfill():
+    """Trigger manual full backfill (dimensions + facts)"""
+    try:
+        data = request.get_json() or {}
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        
+        if not start_date or not end_date:
+            return jsonify({
+                'success': False,
+                'error': 'start_date and end_date are required'
+            }), 400
+        
+        # Validate date format
+        datetime.strptime(start_date, '%Y-%m-%d')
+        datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Create job execution record
+        job = JobExecution(
+            job_type='manual_full_backfill',
+            status='running',
+            started_at=datetime.utcnow(),
+            triggered_by='manual',
+            metadata={'start_date': start_date, 'end_date': end_date}
+        )
+        db.session.add(job)
+        db.session.commit()
+        
+        # Start background thread
+        thread = threading.Thread(
+            target=execute_full_backfill_job,
+            args=(job.id, start_date, end_date)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        active_jobs[job.id] = thread
+        
+        return jsonify({
+            'success': True,
+            'job_id': job.id,
+            'message': f'Full backfill started for {start_date} to {end_date}'
+        }), 202
+        
+    except ValueError as e:
+        return jsonify({
+            'success': False,
+            'error': 'Invalid date format. Use YYYY-MM-DD'
+        }), 400
+    except Exception as e:
+        logger.error(f"Failed to trigger full backfill: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@dashboard_bp.route('/status/<int:job_id>', methods=['GET'])
+def get_job_status(job_id):
+    """Get status of a specific job"""
+    try:
+        job = db.session.get(JobExecution, job_id)
+        
+        if not job:
+            return jsonify({
+                'success': False,
+                'error': 'Job not found'
+            }), 404
+        
+        return jsonify({
+            'success': True,
+            'job': job.to_dict()
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to get job status: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@dashboard_bp.route('/status/recent', methods=['GET'])
+def get_recent_jobs():
+    """Get recent job executions"""
+    try:
+        limit = request.args.get('limit', 20, type=int)
+        
+        jobs = JobExecution.query.order_by(
+            JobExecution.started_at.desc()
+        ).limit(limit).all()
+        
+        return jsonify({
+            'success': True,
+            'jobs': [job.to_dict() for job in jobs]
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to get recent jobs: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@dashboard_bp.route('/stats/table-counts', methods=['GET'])
+def get_table_counts():
+    """Get record counts for all fact tables"""
+    try:
+        counts = {
+            'Trip': db.session.query(FactTrip).count(),
+            'Speeding': db.session.query(FactSpeeding).count(),
+            'Idle': db.session.query(FactIdle).count(),
+            'AWH': db.session.query(FactAWH).count(),
+            'WH': db.session.query(FactWH).count(),
+            'HA': db.session.query(FactHA).count(),
+            'HB': db.session.query(FactHB).count(),
+            'WU': db.session.query(FactWU).count(),
+        }
+        
+        total = sum(counts.values())
+        
+        return jsonify({
+            'success': True,
+            'counts': counts,
+            'total': total,
+            'timestamp': datetime.utcnow().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to get table counts: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@dashboard_bp.route('/stats/last-sync', methods=['GET'])
+def get_last_sync_stats():
+    """Get last successful sync statistics"""
+    try:
+        # Get last completed daily sync
+        daily_sync = JobExecution.query.filter_by(
+            job_type='daily_sync',
+            status='completed'
+        ).order_by(JobExecution.completed_at.desc()).first()
+        
+        # Get last completed weekly backfill
+        weekly_backfill = JobExecution.query.filter_by(
+            job_type='weekly_backfill',
+            status='completed'
+        ).order_by(JobExecution.completed_at.desc()).first()
+        
+        return jsonify({
+            'success': True,
+            'daily_sync': daily_sync.to_dict() if daily_sync else None,
+            'weekly_backfill': weekly_backfill.to_dict() if weekly_backfill else None
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to get last sync stats: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@dashboard_bp.route('/', methods=['GET'])
+def dashboard_page():
+    """Main dashboard HTML page"""
+    html = '''
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GpsGate Data Pipeline Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5rem;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .card h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 1.5rem;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+            font-weight: 600;
+        }
+        
+        input[type="date"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        
+        button {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+        }
+        
+        .stat-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .stat-label {
+            color: #666;
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+        
+        .job-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .job-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .job-item.running {
+            border-left-color: #ffc107;
+            animation: pulse 2s infinite;
+        }
+        
+        .job-item.completed {
+            border-left-color: #28a745;
+        }
+        
+        .job-item.failed {
+            border-left-color: #dc3545;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        
+        .job-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+        
+        .job-type {
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .job-status {
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        
+        .job-status.running {
+            background: #ffc107;
+            color: #000;
+        }
+        
+        .job-status.completed {
+            background: #28a745;
+            color: white;
+        }
+        
+        .job-status.failed {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .job-details {
+            font-size: 0.9rem;
+            color: #666;
+        }
+        
+        .message {
+            padding: 12px;
+            border-radius: 6px;
+            margin-top: 15px;
+            display: none;
+        }
+        
+        .message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .message.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 GpsGate Data Pipeline Dashboard</h1>
+        
+        <div class="grid">
+            <!-- Manual Triggers -->
+            <div class="card">
+                <h2>📊 Manual Triggers</h2>
+                
+                <div class="form-group">
+                    <button onclick="triggerDimensionSync()">
+                        🔄 Run Dimension Sync
+                    </button>
+                </div>
+                
+                <div class="form-group">
+                    <label for="fact-start">Start Date</label>
+                    <input type="date" id="fact-start" value="">
+                </div>
+                
+                <div class="form-group">
+                    <label for="fact-end">End Date</label>
+                    <input type="date" id="fact-end" value="">
+                </div>
+                
+                <div class="form-group">
+                    <button onclick="triggerFactSync()">
+                        📈 Run Fact Sync
+                    </button>
+                </div>
+                
+                <div class="form-group">
+                    <button onclick="triggerFullBackfill()">
+                        🔥 Run Full Backfill
+                    </button>
+                </div>
+                
+                <div id="trigger-message" class="message"></div>
+            </div>
+            
+            <!-- Live Statistics -->
+            <div class="card">
+                <h2>📈 Live Statistics</h2>
+                <div class="stats-grid" id="stats-grid">
+                    <div class="stat-item">
+                        <div class="stat-value" id="total-count">-</div>
+                        <div class="stat-label">Total Records</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="trip-count">-</div>
+                        <div class="stat-label">Trip</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="speeding-count">-</div>
+                        <div class="stat-label">Speeding</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="idle-count">-</div>
+                        <div class="stat-label">Idle</div>
+                    </div>
+                </div>
+                <button onclick="refreshStats()" style="margin-top: 15px;">
+                    🔄 Refresh Stats
+                </button>
+            </div>
+            
+            <!-- Last Sync Info -->
+            <div class="card">
+                <h2>⏰ Last Sync</h2>
+                <div id="last-sync-info">Loading...</div>
+            </div>
+            
+            <!-- Recent Jobs -->
+            <div class="card" style="grid-column: 1 / -1;">
+                <h2>📋 Recent Jobs</h2>
+                <div class="job-list" id="job-list">
+                    Loading...
+                </div>
+                <button onclick="refreshJobs()" style="margin-top: 15px;">
+                    🔄 Refresh Jobs
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Set default dates (yesterday)
+        const today = new Date();
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        document.getElementById('fact-start').value = yesterday.toISOString().split('T')[0];
+        document.getElementById('fact-end').value = yesterday.toISOString().split('T')[0];
+        
+        // Trigger functions
+        async function triggerDimensionSync() {
+            try {
+                const response = await fetch('/dashboard/trigger/dimension-sync', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                const data = await response.json();
+                showMessage(data.success ? 'success' : 'error', data.message || data.error);
+                if (data.success) {
+                    setTimeout(refreshJobs, 1000);
+                }
+            } catch (error) {
+                showMessage('error', 'Request failed: ' + error.message);
+            }
+        }
+        
+        async function triggerFactSync() {
+            const startDate = document.getElementById('fact-start').value;
+            const endDate = document.getElementById('fact-end').value;
+            
+            if (!startDate || !endDate) {
+                showMessage('error', 'Please select start and end dates');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/dashboard/trigger/fact-sync', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({start_date: startDate, end_date: endDate})
+                });
+                const data = await response.json();
+                showMessage(data.success ? 'success' : 'error', data.message || data.error);
+                if (data.success) {
+                    setTimeout(refreshJobs, 1000);
+                }
+            } catch (error) {
+                showMessage('error', 'Request failed: ' + error.message);
+            }
+        }
+        
+        async function triggerFullBackfill() {
+            const startDate = document.getElementById('fact-start').value;
+            const endDate = document.getElementById('fact-end').value;
+            
+            if (!startDate || !endDate) {
+                showMessage('error', 'Please select start and end dates');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/dashboard/trigger/full-backfill', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({start_date: startDate, end_date: endDate})
+                });
+                const data = await response.json();
+                showMessage(data.success ? 'success' : 'error', data.message || data.error);
+                if (data.success) {
+                    setTimeout(refreshJobs, 1000);
+                }
+            } catch (error) {
+                showMessage('error', 'Request failed: ' + error.message);
+            }
+        }
+        
+        // Refresh functions
+        async function refreshStats() {
+            try {
+                const response = await fetch('/dashboard/stats/table-counts');
+                const data = await response.json();
+                if (data.success) {
+                    document.getElementById('total-count').textContent = data.total.toLocaleString();
+                    document.getElementById('trip-count').textContent = data.counts.Trip.toLocaleString();
+                    document.getElementById('speeding-count').textContent = data.counts.Speeding.toLocaleString();
+                    document.getElementById('idle-count').textContent = data.counts.Idle.toLocaleString();
+                }
+            } catch (error) {
+                console.error('Failed to refresh stats:', error);
+            }
+        }
+        
+        async function refreshJobs() {
+            try {
+                const response = await fetch('/dashboard/status/recent');
+                const data = await response.json();
+                if (data.success) {
+                    const jobList = document.getElementById('job-list');
+                    jobList.innerHTML = data.jobs.map(job => `
+                        <div class="job-item ${job.status}">
+                            <div class="job-header">
+                                <span class="job-type">${job.job_type}</span>
+                                <span class="job-status ${job.status}">${job.status}</span>
+                            </div>
+                            <div class="job-details">
+                                Started: ${new Date(job.started_at).toLocaleString()}<br>
+                                ${job.completed_at ? 'Completed: ' + new Date(job.completed_at).toLocaleString() + '<br>' : ''}
+                                ${job.records_processed ? 'Records: ' + job.records_processed.toLocaleString() + '<br>' : ''}
+                                ${job.error_message ? 'Error: ' + job.error_message : ''}
+                            </div>
+                        </div>
+                    `).join('');
+                }
+            } catch (error) {
+                console.error('Failed to refresh jobs:', error);
+            }
+        }
+        
+        async function refreshLastSync() {
+            try {
+                const response = await fetch('/dashboard/stats/last-sync');
+                const data = await response.json();
+                if (data.success) {
+                    const info = document.getElementById('last-sync-info');
+                    let html = '';
+                    if (data.daily_sync) {
+                        html += `<strong>Daily:</strong> ${new Date(data.daily_sync.completed_at).toLocaleString()}<br>`;
+                        html += `Records: ${data.daily_sync.records_processed.toLocaleString()}<br><br>`;
+                    }
+                    if (data.weekly_backfill) {
+                        html += `<strong>Weekly:</strong> ${new Date(data.weekly_backfill.completed_at).toLocaleString()}<br>`;
+                        html += `Records: ${data.weekly_backfill.records_processed.toLocaleString()}`;
+                    }
+                    info.innerHTML = html || 'No sync data available';
+                }
+            } catch (error) {
+                console.error('Failed to refresh last sync:', error);
+            }
+        }
+        
+        function showMessage(type, text) {
+            const msg = document.getElementById('trigger-message');
+            msg.className = 'message ' + type;
+            msg.textContent = text;
+            msg.style.display = 'block';
+            setTimeout(() => {
+                msg.style.display = 'none';
+            }, 5000);
+        }
+        
+        // Auto-refresh
+        refreshStats();
+        refreshJobs();
+        refreshLastSync();
+        
+        setInterval(refreshJobs, 5000);  // Refresh jobs every 5 seconds
+        setInterval(refreshStats, 30000);  // Refresh stats every 30 seconds
+    </script>
+</body>
+</html>
+    '''
+    return render_template_string(html)

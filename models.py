@@ -445,3 +445,47 @@ class FactWU(db.Model):
         db.UniqueConstraint("app_id", "event_date", "start_time", "vehicle",
                             name="uq_fact_wu"),
     )
+
+
+# ------------------------------------------------------------------
+# JOB EXECUTION TRACKING
+# ------------------------------------------------------------------
+
+class JobExecution(db.Model):
+    """Track scheduled and manual job executions"""
+    __tablename__ = "job_execution"
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    job_type = db.Column(db.String(100), nullable=False)  # daily_sync, weekly_backfill, manual_dimension_sync, etc.
+    status = db.Column(db.String(50), nullable=False)  # running, completed, failed
+    
+    started_at = db.Column(db.DateTime, nullable=False)
+    completed_at = db.Column(db.DateTime)
+    
+    records_processed = db.Column(db.Integer, default=0)
+    errors = db.Column(db.Integer, default=0)
+    
+    error_message = db.Column(db.Text)
+    metadata = db.Column(db.JSON)  # Store job-specific data (date ranges, results, etc.)
+    
+    triggered_by = db.Column(db.String(100))  # 'scheduler', 'manual', 'api'
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    def __repr__(self):
+        return f'<JobExecution {self.job_type} {self.status} {self.started_at}>'
+    
+    def to_dict(self):
+        """Convert to dictionary for API responses"""
+        return {
+            'id': self.id,
+            'job_type': self.job_type,
+            'status': self.status,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'records_processed': self.records_processed,
+            'errors': self.errors,
+            'error_message': self.error_message,
+            'metadata': self.metadata,
+            'triggered_by': self.triggered_by
+        }

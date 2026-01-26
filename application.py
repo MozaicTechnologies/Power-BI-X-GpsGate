@@ -34,8 +34,8 @@ def create_app():
     from api import api_bp
     app.register_blueprint(api_bp)
     
-    # Register dashboard
-    from dashboard import dashboard_bp
+    # Register enhanced dashboard with manual triggers
+    from dashboard_enhanced import dashboard_bp
     app.register_blueprint(dashboard_bp)
     
     return app
