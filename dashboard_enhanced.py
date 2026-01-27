@@ -562,6 +562,48 @@ def get_scheduler_status():
         }), 500
 
 
+@dashboard_bp.route('/ip-info', methods=['GET'])
+def get_ip_info():
+    """Get server's outbound IP address for whitelisting purposes"""
+    import requests as req
+    
+    try:
+        # Try multiple IP detection services
+        services = [
+            ('https://api.ipify.org?format=json', 'ip'),
+            ('https://ipinfo.io/json', 'ip'),
+        ]
+        
+        for url, key in services:
+            try:
+                resp = req.get(url, timeout=5)
+                if resp.ok:
+                    data = resp.json()
+                    ip = data.get(key)
+                    
+                    return jsonify({
+                        'success': True,
+                        'outbound_ip': ip,
+                        'service': url,
+                        'full_data': data,
+                        'message': 'This is the IP address that GpsGate sees when Render makes API calls'
+                    })
+            except Exception as e:
+                logger.warning(f"Failed to get IP from {url}: {e}")
+                continue
+        
+        return jsonify({
+            'success': False,
+            'error': 'Could not detect outbound IP from any service'
+        }), 500
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @dashboard_bp.route('/', methods=['GET'])
 def dashboard_page():
     """Main dashboard HTML page"""
