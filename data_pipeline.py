@@ -763,7 +763,7 @@ retry-safe downloads, and DB insertion.
 """
 
 from flask import Blueprint, request, jsonify
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -1066,7 +1066,14 @@ def process_event_data(event_name, response_key):
     tag_id = data.get("tag_id")
     event_id = data.get("event_id")
 
+    # Primary report IDs
     report_id = "1225" if event_name == "Trip" else "25"
+    
+    # Fallback report IDs - only use VERIFIED IDs from your system
+    fallback_report_ids = {
+        "Trip": ["1225", "25"],  # Try 1225 first, then fall back to 25 
+        "default": ["25"]        # All events work with 25
+    }
 
     if not all([app_id, token, base_url, tag_id]):
         logger.error("Missing required parameters")
@@ -1078,44 +1085,79 @@ def process_event_data(event_name, response_key):
 
     for week in weeks:
         try:
-            # ---------------- RENDER ----------------
-            render = Render.query.filter_by(
-                app_id=str(app_id),
-                period_start=week["week_start"],
-                period_end=week["week_end"],
-                tag_id=str(tag_id),
-                report_id=str(report_id),
-                event_id=str(event_id) if event_name != "Trip" else None
-            ).first()
+            render_id = None
+            successful_report_id = None
+            
+            # Try primary report ID first, then fallbacks
+            report_ids_to_try = fallback_report_ids.get(event_name, fallback_report_ids["default"])
+            if report_id not in report_ids_to_try:
+                report_ids_to_try = [report_id] + report_ids_to_try
+            
+            for try_report_id in report_ids_to_try:
+                logger.info(f"Trying report_id={try_report_id} for event={event_name}")
+                
+                # ---------------- RENDER ----------------
+                render = Render.query.filter_by(
+                    app_id=str(app_id),
+                    period_start=week["week_start"],
+                    period_end=week["week_end"],
+                    tag_id=str(tag_id),
+                    report_id=str(try_report_id),
+                    event_id=str(event_id) if event_name != "Trip" else None
+                ).first()
 
-            if render:
-                render_id = render.render_id
-                logger.debug(f"Using cached render_id={render_id}")
-            else:
-                payload = {
-                    "app_id": app_id,
-                    "period_start": week["week_start"],
-                    "period_end": week["week_end"],
-                    "tag_id": tag_id,
-                    "token": token,
-                    "base_url": base_url,
-                    "report_id": report_id,
-                }
-                if event_name != "Trip":
-                    payload["event_id"] = event_id
+                if render:
+                    render_id = render.render_id
+                    successful_report_id = try_report_id
+                    logger.debug(f"Using cached render_id={render_id} with report_id={try_report_id}")
+                    break
+                else:
+                    payload = {
+                        "app_id": app_id,
+                        "period_start": week["week_start"],
+                        "period_end": week["week_end"],
+                        "tag_id": tag_id,
+                        "token": token,
+                        "base_url": base_url,
+                        "report_id": try_report_id,
+                    }
+                    if event_name != "Trip":
+                        payload["event_id"] = event_id
 
-                render_id = None
-                for _ in range(3):
-                    r = RESILIENT_SESSION.post(RENDER_URL, data=payload, timeout=(10, 60))
-                    if r.status_code == 200:
-                        render_id = r.json().get("render_id")
-                        if render_id:
-                            break
-                    pytime.sleep(5)
+                    for attempt in range(2):  # Reduced attempts per report_id
+                        r = RESILIENT_SESSION.post(RENDER_URL, data=payload, timeout=(10, 60))
+                        if r.status_code == 200:
+                            render_id = r.json().get("render_id")
+                            if render_id:
+                                successful_report_id = try_report_id
+                                logger.info(f"Render succeeded with report_id={try_report_id}")
+                                break
+                        else:
+                            logger.warning(f"Render failed with report_id={try_report_id}, status={r.status_code}")
+                        pytime.sleep(2)
 
-                if not render_id:
-                    logger.error("Render failed")
-                    continue
+                    if render_id:
+                        break
+                        
+            if not render_id:
+                logger.error("Render failed for all report IDs")
+                continue
+
+            # Store the successful render record if it's not cached
+            if successful_report_id and not render:
+                new_render = Render(
+                    app_id=str(app_id),
+                    period_start=week["week_start"],
+                    period_end=week["week_end"],
+                    tag_id=str(tag_id),
+                    report_id=str(successful_report_id),
+                    render_id=render_id,
+                    event_id=str(event_id) if event_name != "Trip" else None,
+                    timestamp=datetime.now(timezone.utc),
+                )
+                db.session.add(new_render)
+                db.session.commit()
+                logger.info(f"Stored new render record with report_id={successful_report_id}")
 
             # ---------------- RESULT ----------------
             result = Result.query.filter_by(render_id=str(render_id)).first()
@@ -1127,7 +1169,7 @@ def process_event_data(event_name, response_key):
                     "render_id": render_id,
                     "token": token,
                     "base_url": base_url,
-                    "report_id": report_id,
+                    "report_id": successful_report_id or report_id,
                 }
                 gdrive_link = None
                 for _ in range(3):
