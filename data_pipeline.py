@@ -1213,3 +1213,7 @@ def hb():
 @pipeline_bp.route("/wu-data", methods=["POST"])
 def wu():
     return process_event_data("WU", "wu_events")
+
+@pipeline_bp.route("/test", methods=["GET"])
+def test():
+    return jsonify({"message": "Pipeline blueprint is working!"}), 200

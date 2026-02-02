@@ -38,4 +38,8 @@ def create_app():
     from dashboard_enhanced import dashboard_bp
     app.register_blueprint(dashboard_bp)
     
+    # Register data pipeline blueprint
+    from data_pipeline import pipeline_bp
+    app.register_blueprint(pipeline_bp)
+    
     return app
