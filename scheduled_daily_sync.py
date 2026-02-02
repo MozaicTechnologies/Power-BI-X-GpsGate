@@ -26,16 +26,16 @@ from config import Config
 
 logger = get_logger(__name__)
 
-# Event type to API configuration mapping
+# Event type to API configuration mapping (MATCHES working backfill script)
 EVENT_CONFIG = {
-    'Trip': {'report_id': '1225', 'event_id': None, 'response_key': 'Trip'},
-    'Speeding': {'report_id': '25', 'event_id': '6', 'response_key': 'Speeding'},
-    'Idle': {'report_id': '25', 'event_id': '4', 'response_key': 'Idle'},
-    'AWH': {'report_id': '25', 'event_id': '8', 'response_key': 'AWH'},
-    'WH': {'report_id': '25', 'event_id': '9', 'response_key': 'WH'},
-    'HA': {'report_id': '25', 'event_id': '26', 'response_key': 'HA'},
-    'HB': {'report_id': '25', 'event_id': '27', 'response_key': 'HB'},
-    'WU': {'report_id': '25', 'event_id': '21', 'response_key': 'WU'}
+    'Trip': {'report_id': '25', 'event_id': None, 'response_key': 'trip_events'},
+    'Speeding': {'report_id': '25', 'event_id': '18', 'response_key': 'speed_events'},
+    'Idle': {'report_id': '25', 'event_id': '1328', 'response_key': 'idle_events'},
+    'AWH': {'report_id': '25', 'event_id': '12', 'response_key': 'awh_events'},
+    'WH': {'report_id': '25', 'event_id': '13', 'response_key': 'wh_events'},
+    'HA': {'report_id': '25', 'event_id': '1327', 'response_key': 'ha_events'},
+    'HB': {'report_id': '25', 'event_id': '1326', 'response_key': 'hb_events'},
+    'WU': {'report_id': '25', 'event_id': '17', 'response_key': 'wu_events'}
 }
 
 
@@ -55,7 +55,7 @@ def process_event_with_dates(app, event_type, start_date, end_date):
         "token": Config.TOKEN,
         "base_url": Config.BASE_URL,
         "report_id": config['report_id'],
-        "tag_id": "1",
+        "tag_id": "39",  # Same as working backfill script
         "period_start": f"{start_date}T00:00:00Z",
         "period_end": f"{end_date}T23:59:59Z"
     }
@@ -116,6 +116,20 @@ def run_daily_sync():
             
             logger.info(f"🚀 Starting daily sync for {start_date}")
             
+            # Step 1: Sync dimension tables
+            logger.info("📋 Syncing dimension tables...")
+            try:
+                from sync_dimensions_from_api import main as sync_dimensions
+                dimension_result = sync_dimensions()
+                dimension_records = dimension_result if isinstance(dimension_result, int) else 0
+                logger.info(f"✅ Dimension tables synced: {dimension_records} records processed")
+            except Exception as e:
+                logger.error(f"⚠️  Dimension sync failed: {str(e)}")
+                dimension_records = 0
+            
+            # Step 2: Process fact data for yesterday
+            logger.info(f"📊 Processing fact data for {start_date}...")
+            
             # Event types to process
             event_types = [
                 'Trip',
@@ -170,19 +184,24 @@ def run_daily_sync():
             # Update job execution record
             job.status = 'completed'
             job.completed_at = datetime.utcnow()
-            job.records_processed = total_inserted
+            job.records_processed = total_inserted + dimension_records
             job.errors = total_failed
-            job.job_metadata = results
+            job.job_metadata = {
+                'date': start_date,
+                'dimension_records': dimension_records,
+                'fact_results': results
+            }
             db.session.commit()
             
             logger.info(
                 f"✅ Daily sync completed: "
-                f"{total_inserted} inserted, {total_failed} failed"
+                f"dimensions={dimension_records}, facts={total_inserted} inserted, {total_failed} failed"
             )
             
             return {
                 'success': True,
                 'date': start_date,
+                'dimension_records': dimension_records,
                 'total_inserted': total_inserted,
                 'total_failed': total_failed,
                 'results': results

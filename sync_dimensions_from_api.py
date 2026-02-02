@@ -379,6 +379,7 @@ def sync_tags(cur):
         rows,
     )
     log(f"dim_tags ✓ {len(rows)}")
+    return len(rows)
 
 
 def sync_event_rules(cur):
@@ -400,6 +401,7 @@ def sync_event_rules(cur):
         rows,
     )
     log(f"dim_event_rules ✓ {len(rows)}")
+    return len(rows)
 
 
 def sync_reports(cur):
@@ -421,6 +423,7 @@ def sync_reports(cur):
         rows,
     )
     log(f"dim_reports ✓ {len(rows)}")
+    return len(rows)
 
 
 def sync_vehicles_and_drivers(cur):
@@ -530,6 +533,7 @@ def sync_vehicles_and_drivers(cur):
 
     log(f"dim_vehicles ✓ {len(vehicle_rows)}")
     log(f"dim_drivers ✓ {len(driver_rows)}")
+    return len(vehicle_rows) + len(driver_rows)
 
 
 def sync_vehicle_custom_fields(cur):
@@ -544,6 +548,7 @@ def sync_vehicle_custom_fields(cur):
 
     rows = []
     skipped = 0
+    total_processed = 0
 
     for idx, u in enumerate(users, start=1):
         vid = u.get("id")
@@ -566,6 +571,7 @@ def sync_vehicle_custom_fields(cur):
 
         for f in fields:
             rows.append((int(vid), f.get("name"), str(f.get("value"))))
+            total_processed += 1
 
         if len(rows) >= 500:
             cur.executemany(
@@ -593,6 +599,7 @@ def sync_vehicle_custom_fields(cur):
         )
 
     log(f"dim_vehicle_custom_fields ✓ | skipped {skipped}")
+    return total_processed
 
 # ------------------------------------------------------------------
 # MAIN
@@ -600,25 +607,27 @@ def sync_vehicle_custom_fields(cur):
 def main():
     log("🚀 Starting dimension sync")
     start = time.time()
+    total_records = 0
 
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
-            sync_tags(cur)
+            total_records += sync_tags(cur)
             conn.commit()
 
-            sync_event_rules(cur)
+            total_records += sync_event_rules(cur)
             conn.commit()
 
-            sync_reports(cur)
+            total_records += sync_reports(cur)
             conn.commit()
 
-            sync_vehicles_and_drivers(cur)
+            total_records += sync_vehicles_and_drivers(cur)
             conn.commit()
 
-            sync_vehicle_custom_fields(cur)
+            total_records += sync_vehicle_custom_fields(cur)
             conn.commit()
 
-    log(f"✅ Completed in {round(time.time() - start, 2)}s")
+    log(f"✅ Completed in {round(time.time() - start, 2)}s - Total records: {total_records:,}")
+    return total_records
 
 if __name__ == "__main__":
     main()

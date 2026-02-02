@@ -98,15 +98,18 @@ def execute_dimension_sync_job(job_id):
             from sync_dimensions_from_api import main as sync_dimension_main
             
             logger.info(f"🚀 Starting dimension sync job {job_id}")
-            sync_dimension_main()  # Runs the sync
+            total_records = sync_dimension_main()  # Now returns record count
             
             job.status = 'completed'
             job.completed_at = datetime.utcnow()
-            job.records_processed = 0  # sync_dimensions_from_api doesn't return count
-            job.job_metadata = {'message': 'Dimension sync completed from GpsGate API'}
+            job.records_processed = total_records
+            job.job_metadata = {
+                'message': f'Dimension sync completed - {total_records:,} records processed',
+                'total_records': total_records
+            }
             db.session.commit()
             
-            logger.info(f"✅ Dimension sync completed")
+            logger.info(f"✅ Dimension sync completed: {total_records:,} records processed")
             
         except Exception as e:
             logger.error(f"❌ Dimension sync failed: {str(e)}")
