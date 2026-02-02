@@ -1268,28 +1268,3 @@ def check_gpsgate_server_health():
             'message': f'Health check failed: {str(e)}',
             'test_result': 'check_failed'
         }), 500
-        
-        function showMessage(type, text) {
-            const msg = document.getElementById('trigger-message');
-            msg.className = 'message ' + type;
-            msg.textContent = text;
-            msg.style.display = 'block';
-            setTimeout(() => {
-                msg.style.display = 'none';
-            }, 5000);
-        }
-        
-        // Auto-refresh
-        refreshStats();
-        refreshJobs();
-        refreshLastSync();
-        refreshSchedulerStatus();
-        
-        setInterval(refreshJobs, 5000);  // Refresh jobs every 5 seconds
-        setInterval(refreshStats, 30000);  // Refresh stats every 30 seconds
-        setInterval(refreshSchedulerStatus, 10000);  // Refresh scheduler status every 10 seconds
-    </script>
-</body>
-</html>
-    '''
-    return render_template_string(html)
