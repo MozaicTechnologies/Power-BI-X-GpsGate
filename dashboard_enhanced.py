@@ -20,16 +20,16 @@ dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/dashboard')
 # Store active job threads
 active_jobs = {}
 
-# Event type to API configuration mapping
+# Event type to API configuration mapping (MATCHES backfill_2025_week1.py)
 EVENT_CONFIG = {
-    'Trip': {'report_id': '1225', 'event_id': None, 'response_key': 'Trip'},
-    'Speeding': {'report_id': '25', 'event_id': '6', 'response_key': 'Speeding'},
-    'Idle': {'report_id': '25', 'event_id': '4', 'response_key': 'Idle'},
-    'AWH': {'report_id': '25', 'event_id': '8', 'response_key': 'AWH'},
-    'WH': {'report_id': '25', 'event_id': '9', 'response_key': 'WH'},
-    'HA': {'report_id': '25', 'event_id': '26', 'response_key': 'HA'},
-    'HB': {'report_id': '25', 'event_id': '27', 'response_key': 'HB'},
-    'WU': {'report_id': '25', 'event_id': '21', 'response_key': 'WU'}
+    'Trip': {'report_id': '25', 'event_id': None, 'response_key': 'trip_events'},
+    'Speeding': {'report_id': '25', 'event_id': '18', 'response_key': 'speed_events'},
+    'Idle': {'report_id': '25', 'event_id': '1328', 'response_key': 'idle_events'},
+    'AWH': {'report_id': '25', 'event_id': '12', 'response_key': 'awh_events'},
+    'WH': {'report_id': '25', 'event_id': '13', 'response_key': 'wh_events'},
+    'HA': {'report_id': '25', 'event_id': '1327', 'response_key': 'ha_events'},
+    'HB': {'report_id': '25', 'event_id': '1326', 'response_key': 'hb_events'},
+    'WU': {'report_id': '25', 'event_id': '17', 'response_key': 'wu_events'}
 }
 
 
@@ -43,13 +43,13 @@ def process_event_with_dates(app, event_type, start_date, end_date):
     
     config = EVENT_CONFIG[event_type]
     
-    # Prepare payload matching process_event_data signature
+    # Prepare payload matching process_event_data signature (MATCHES backfill_2025_week1.py)
     payload = {
         "app_id": "6",
         "token": Config.TOKEN,
         "base_url": Config.BASE_URL,
         "report_id": config['report_id'],
-        "tag_id": "1",
+        "tag_id": "39",  # Same as working backfill script
         "period_start": f"{start_date}T00:00:00Z",
         "period_end": f"{end_date}T23:59:59Z"
     }
@@ -130,30 +130,16 @@ def execute_fact_sync_job(job_id, start_date, end_date):
         try:
             logger.info(f"🚀 Starting fact sync job {job_id}: {start_date} to {end_date}")
             
-            # Skip problematic events due to server state issues
-            # When GpsGate server returns "reportId: 0", all report IDs fail
-            event_types = []  # Temporarily skip all events until server recovers
-            skipped_events = ['Trip', 'Speeding', 'Idle', 'AWH', 'WH', 'HA', 'HB', 'WU']
-            
-            logger.warning(f"⚠️  GpsGate server state issue detected - all report IDs returning 'reportId: 0'")
-            logger.info(f"Skipping all {len(skipped_events)} event types until server recovers")
+            # Process all event types (server state issue resolved)
+            event_types = ['Trip', 'Speeding', 'Idle', 'AWH', 'WH', 'HA', 'HB', 'WU']
             
             results = {}
             total_inserted = 0
             total_failed = 0
             
-            # Mark all events as skipped due to server state issue
-            for event_type in skipped_events:
-                results[event_type] = {
-                    'status': 'skipped', 
-                    'reason': 'GpsGate server state issue - all reportIds returning reportId: 0 error',
-                    'note': 'Server was working 7 minutes ago, this is a temporary issue',
-                    'inserted': 0,
-                    'failed': 0
-                }
-            
             for event_type in event_types:
                 try:
+                    logger.info(f"Processing {event_type} for {start_date} to {end_date}")
                     result = process_event_with_dates(
                         app=app,
                         event_type=event_type,
@@ -163,9 +149,11 @@ def execute_fact_sync_job(job_id, start_date, end_date):
                     results[event_type] = result
                     total_inserted += result.get('inserted', 0)
                     total_failed += result.get('failed', 0)
+                    logger.info(f"✅ {event_type}: {result.get('inserted', 0)} inserted, {result.get('failed', 0)} failed")
                 except Exception as e:
                     logger.error(f"❌ {event_type} failed: {str(e)}")
                     results[event_type] = {'status': 'failed', 'error': str(e)}
+                    total_failed += 1
             
             job.status = 'completed'
             job.completed_at = datetime.utcnow()
@@ -175,15 +163,11 @@ def execute_fact_sync_job(job_id, start_date, end_date):
                 'results': results, 
                 'start_date': start_date, 
                 'end_date': end_date,
-                'server_state': 'degraded',
-                'issue': 'GpsGate API returning reportId: 0 for all reports',
-                'recommendation': 'Retry in 10-15 minutes when server recovers'
+                'total_events_processed': len(event_types)
             }
             db.session.commit()
             
-            logger.warning(f"⚠️  Fact sync skipped: GpsGate server returning reportId: 0 for all reports")
-            logger.info(f"All {len(skipped_events)} events skipped - will retry when server recovers")
-            logger.info(f"Recommendation: Try again in 10-15 minutes when server state recovers")
+            logger.info(f"✅ Fact sync completed: {total_inserted} inserted, {total_failed} failed")
             
         except Exception as e:
             logger.error(f"❌ Fact sync failed: {str(e)}")
@@ -1012,6 +996,17 @@ def dashboard_page():
         yesterday.setDate(yesterday.getDate() - 1);
         document.getElementById('fact-start').value = yesterday.toISOString().split('T')[0];
         document.getElementById('fact-end').value = yesterday.toISOString().split('T')[0];
+        
+        // Message display function
+        function showMessage(type, text) {
+            const msg = document.getElementById('trigger-message');
+            msg.className = 'message ' + type;
+            msg.textContent = text;
+            msg.style.display = 'block';
+            setTimeout(() => {
+                msg.style.display = 'none';
+            }, 5000);
+        }
         
         // Trigger functions
         async function triggerDimensionSync() {
