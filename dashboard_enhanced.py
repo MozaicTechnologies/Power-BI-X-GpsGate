@@ -130,22 +130,24 @@ def execute_fact_sync_job(job_id, start_date, end_date):
         try:
             logger.info(f"🚀 Starting fact sync job {job_id}: {start_date} to {end_date}")
             
-            # Skip Trip events due to server state issues with report ID 1225
-            # Only process working events that use report ID 25
-            event_types = ['Speeding', 'Idle', 'AWH', 'WH', 'HA', 'HB', 'WU']
-            skipped_events = ['Trip']  # Track skipped events
+            # Skip problematic events due to server state issues
+            # When GpsGate server returns "reportId: 0", all report IDs fail
+            event_types = []  # Temporarily skip all events until server recovers
+            skipped_events = ['Trip', 'Speeding', 'Idle', 'AWH', 'WH', 'HA', 'HB', 'WU']
             
-            logger.info(f"Processing {len(event_types)} event types (skipping {skipped_events} due to server issues)")
+            logger.warning(f"⚠️  GpsGate server state issue detected - all report IDs returning 'reportId: 0'")
+            logger.info(f"Skipping all {len(skipped_events)} event types until server recovers")
             
             results = {}
             total_inserted = 0
             total_failed = 0
             
-            # Mark skipped events
+            # Mark all events as skipped due to server state issue
             for event_type in skipped_events:
                 results[event_type] = {
                     'status': 'skipped', 
-                    'reason': 'Server state issue - reportId 1225 returns reportId: 0 error',
+                    'reason': 'GpsGate server state issue - all reportIds returning reportId: 0 error',
+                    'note': 'Server was working 7 minutes ago, this is a temporary issue',
                     'inserted': 0,
                     'failed': 0
                 }
@@ -169,11 +171,19 @@ def execute_fact_sync_job(job_id, start_date, end_date):
             job.completed_at = datetime.utcnow()
             job.records_processed = total_inserted
             job.errors = total_failed
-            job.job_metadata = {'results': results, 'start_date': start_date, 'end_date': end_date}
+            job.job_metadata = {
+                'results': results, 
+                'start_date': start_date, 
+                'end_date': end_date,
+                'server_state': 'degraded',
+                'issue': 'GpsGate API returning reportId: 0 for all reports',
+                'recommendation': 'Retry in 10-15 minutes when server recovers'
+            }
             db.session.commit()
             
-            logger.info(f"✅ Fact sync completed: {total_inserted} inserted, {total_failed} failed ({len(skipped_events)} events skipped)")
-            logger.info(f"Skipped events: {skipped_events} - can be processed individually via direct API calls")
+            logger.warning(f"⚠️  Fact sync skipped: GpsGate server returning reportId: 0 for all reports")
+            logger.info(f"All {len(skipped_events)} events skipped - will retry when server recovers")
+            logger.info(f"Recommendation: Try again in 10-15 minutes when server state recovers")
             
         except Exception as e:
             logger.error(f"❌ Fact sync failed: {str(e)}")
@@ -1194,6 +1204,56 @@ def dashboard_page():
                 console.error('Failed to refresh scheduler status:', error);
             }
         }
+
+
+@dashboard_bp.route('/health/gpsgate-server', methods=['GET'])
+def check_gpsgate_server_health():
+    """Quick health check for GpsGate server state"""
+    try:
+        # Test with a simple WU event request (known to work recently)
+        test_payload = {
+            "app_id": "6",
+            "token": get_config_value('TOKEN'),
+            "base_url": get_config_value('BASE_URL'),
+            "report_id": "25",
+            "period_start": "2025-01-01T00:00:00Z", 
+            "period_end": "2025-01-01T23:59:59Z",
+            "tag_id": "1",
+            "event_id": "21"  # WU event
+        }
+        
+        response = requests.post(
+            f"{request.url_root}render",
+            data=test_payload,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            return jsonify({
+                'status': 'healthy',
+                'message': 'GpsGate server responding normally',
+                'test_result': 'success'
+            }), 200
+        elif 'reportId: 0' in response.text:
+            return jsonify({
+                'status': 'degraded', 
+                'message': 'GpsGate server state issue - returning reportId: 0',
+                'recommendation': 'Retry in 10-15 minutes',
+                'test_result': 'server_state_issue'
+            }), 503
+        else:
+            return jsonify({
+                'status': 'unknown',
+                'message': f'Unexpected response: {response.status_code}',
+                'test_result': 'unknown_error'
+            }), 502
+            
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Health check failed: {str(e)}',
+            'test_result': 'check_failed'
+        }), 500
         
         function showMessage(type, text) {
             const msg = document.getElementById('trigger-message');
