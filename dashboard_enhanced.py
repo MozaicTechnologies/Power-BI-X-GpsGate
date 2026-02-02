@@ -1205,6 +1205,20 @@ def dashboard_page():
             }
         }
 
+        // Initialize dashboard
+        refreshJobs();
+        refreshLastSync();
+        refreshSchedulerStatus();
+        
+        setInterval(refreshJobs, 5000);  // Refresh jobs every 5 seconds
+        setInterval(refreshStats, 30000);  // Refresh stats every 30 seconds
+        setInterval(refreshSchedulerStatus, 10000);  // Refresh scheduler status every 10 seconds
+    </script>
+</body>
+</html>
+    '''
+    return render_template_string(html)
+
 
 @dashboard_bp.route('/health/gpsgate-server', methods=['GET'])
 def check_gpsgate_server_health():
