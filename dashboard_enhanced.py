@@ -130,10 +130,25 @@ def execute_fact_sync_job(job_id, start_date, end_date):
         try:
             logger.info(f"🚀 Starting fact sync job {job_id}: {start_date} to {end_date}")
             
-            event_types = ['Trip', 'Speeding', 'Idle', 'AWH', 'WH', 'HA', 'HB', 'WU']
+            # Skip Trip events due to server state issues with report ID 1225
+            # Only process working events that use report ID 25
+            event_types = ['Speeding', 'Idle', 'AWH', 'WH', 'HA', 'HB', 'WU']
+            skipped_events = ['Trip']  # Track skipped events
+            
+            logger.info(f"Processing {len(event_types)} event types (skipping {skipped_events} due to server issues)")
+            
             results = {}
             total_inserted = 0
             total_failed = 0
+            
+            # Mark skipped events
+            for event_type in skipped_events:
+                results[event_type] = {
+                    'status': 'skipped', 
+                    'reason': 'Server state issue - reportId 1225 returns reportId: 0 error',
+                    'inserted': 0,
+                    'failed': 0
+                }
             
             for event_type in event_types:
                 try:
@@ -157,7 +172,8 @@ def execute_fact_sync_job(job_id, start_date, end_date):
             job.job_metadata = {'results': results, 'start_date': start_date, 'end_date': end_date}
             db.session.commit()
             
-            logger.info(f"✅ Fact sync completed: {total_inserted} inserted, {total_failed} failed")
+            logger.info(f"✅ Fact sync completed: {total_inserted} inserted, {total_failed} failed ({len(skipped_events)} events skipped)")
+            logger.info(f"Skipped events: {skipped_events} - can be processed individually via direct API calls")
             
         except Exception as e:
             logger.error(f"❌ Fact sync failed: {str(e)}")
