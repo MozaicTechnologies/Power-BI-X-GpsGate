@@ -20,18 +20,20 @@ services:
     env: python
     schedule: "0 2 * * *"
     buildCommand: pip install -r requirements.txt
-    startCommand: python scheduled_daily_sync.py
+    startCommand: |
+      cd /opt/render/project/src && python scheduled_daily_sync.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.13.4
   
-  # Cron Job - Weekly Backfill (Every Sunday at 3:00 AM UTC)
+  # Cron Job - Weekly Backfill (Every Sunday at 3:00 AM UTC)  
   - type: cron
     name: gpsgate-weekly-backfill
     env: python
     schedule: "0 3 * * 0"
     buildCommand: pip install -r requirements.txt
-    startCommand: python scheduled_weekly_backfill.py
+    startCommand: |
+      cd /opt/render/project/src && python scheduled_weekly_backfill.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.13.4

@@ -10,19 +10,37 @@ import os
 import json
 from datetime import datetime, timedelta
 import traceback
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+print(f"[WEEKLY_BACKFILL] Starting scheduled weekly backfill at {datetime.utcnow()}")
+print(f"[WEEKLY_BACKFILL] Python executable: {sys.executable}")
+print(f"[WEEKLY_BACKFILL] Working directory: {os.getcwd()}")
+print(f"[WEEKLY_BACKFILL] Script path: {os.path.abspath(__file__)}")
 
-# Add current directory to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from application import create_app, db
-from models import JobExecution
-from logger_config import get_logger
-from data_pipeline import process_event_data
-from config import Config
+try:
+    from dotenv import load_dotenv
+    print("[WEEKLY_BACKFILL] dotenv imported successfully")
+    
+    # Load environment variables
+    load_dotenv()
+    print("[WEEKLY_BACKFILL] Environment variables loaded")
+    
+    # Add current directory to path
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    print("[WEEKLY_BACKFILL] Path updated")
+    
+    from application import create_app, db
+    from models import JobExecution
+    from logger_config import get_logger
+    from data_pipeline import process_event_data
+    from config import Config
+    print("[WEEKLY_BACKFILL] All imports successful")
+    
+    logger = get_logger(__name__)
+    
+except Exception as e:
+    print(f"[WEEKLY_BACKFILL] FATAL ERROR during imports: {str(e)}")
+    print(f"[WEEKLY_BACKFILL] Traceback: {traceback.format_exc()}")
+    sys.exit(1)
 
 logger = get_logger(__name__)
 

@@ -1225,13 +1225,13 @@ def check_gpsgate_server_health():
         # Test with a simple WU event request (known to work recently)
         test_payload = {
             "app_id": "6",
-            "token": get_config_value('TOKEN'),
-            "base_url": get_config_value('BASE_URL'),
+            "token": Config.TOKEN,
+            "base_url": Config.BASE_URL,
             "report_id": "25",
             "period_start": "2025-01-01T00:00:00Z", 
             "period_end": "2025-01-01T23:59:59Z",
-            "tag_id": "1",
-            "event_id": "21"  # WU event
+            "tag_id": "39",  # Use working configuration
+            "event_id": "17"  # WU event with correct ID
         }
         
         response = requests.post(

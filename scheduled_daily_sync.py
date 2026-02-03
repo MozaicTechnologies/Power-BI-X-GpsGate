@@ -10,21 +10,37 @@ import os
 import json
 from datetime import datetime, timedelta
 import traceback
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+print(f"[DAILY_SYNC] Starting scheduled daily sync at {datetime.utcnow()}")
+print(f"[DAILY_SYNC] Python executable: {sys.executable}")
+print(f"[DAILY_SYNC] Working directory: {os.getcwd()}")
+print(f"[DAILY_SYNC] Script path: {os.path.abspath(__file__)}")
 
-# Add current directory to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from application import create_app, db
-from models import JobExecution
-from logger_config import get_logger
-from data_pipeline import process_event_data
-from config import Config
-
-logger = get_logger(__name__)
+try:
+    from dotenv import load_dotenv
+    print("[DAILY_SYNC] dotenv imported successfully")
+    
+    # Load environment variables
+    load_dotenv()
+    print("[DAILY_SYNC] Environment variables loaded")
+    
+    # Add current directory to path
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    print("[DAILY_SYNC] Path updated")
+    
+    from application import create_app, db
+    from models import JobExecution
+    from logger_config import get_logger
+    from data_pipeline import process_event_data
+    from config import Config
+    print("[DAILY_SYNC] All imports successful")
+    
+    logger = get_logger(__name__)
+    
+except Exception as e:
+    print(f"[DAILY_SYNC] FATAL ERROR during imports: {str(e)}")
+    print(f"[DAILY_SYNC] Traceback: {traceback.format_exc()}")
+    sys.exit(1)
 
 # Event type to API configuration mapping (MATCHES working backfill script)
 EVENT_CONFIG = {
