@@ -508,12 +508,17 @@ def store_event_data_to_db(df, app_id, tag_id, event_name):
         INSERT INTO {table} ({", ".join(cols)})
         VALUES ({", ".join(f":{c}" for c in cols)})
         ON CONFLICT DO NOTHING
+        RETURNING 1
     """
 
     try:
-        db.session.execute(text(sql), records)
+        result = db.session.execute(text(sql), records)
+        # Count actual inserted rows; duplicates are excluded by ON CONFLICT DO NOTHING.
+        inserted = len(result.fetchall())
+        duplicate_skipped = max(0, len(records) - inserted)
+        total_skipped = skipped + duplicate_skipped
         db.session.commit()
-        return {"inserted": len(records), "skipped": skipped, "failed": failed}
+        return {"inserted": inserted, "skipped": total_skipped, "failed": failed}
     except Exception:
         db.session.rollback()
         logger.exception(f"[DB_STORAGE] {event_name} insert failed")

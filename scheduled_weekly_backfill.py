@@ -150,6 +150,7 @@ def run_weekly_backfill():
             ]
             
             results = {}
+            total_raw = 0
             total_inserted = 0
             total_skipped = 0
             total_failed = 0
@@ -165,24 +166,35 @@ def run_weekly_backfill():
                         end_date=end_str
                     )
                     
+                    inserted = result.get('inserted', 0)
+                    skipped = result.get('skipped', 0)
+                    failed = result.get('failed', 0)
+                    raw = result.get('raw', 0)
+
                     results[event_type] = {
                         'status': 'success',
-                        'inserted': result.get('inserted', 0),
-                        'skipped': result.get('skipped', 0),
-                        'failed': result.get('failed', 0)
+                        'raw': raw,
+                        'inserted': inserted,
+                        'skipped': skipped,
+                        'failed': failed
                     }
                     
-                    total_inserted += result.get('inserted', 0)
-                    total_skipped += result.get('skipped', 0)
-                    total_failed += result.get('failed', 0)
+                    total_raw += raw
+                    total_inserted += inserted
+                    total_skipped += skipped
+                    total_failed += failed
                     
                     logger.info(
                         f"✅ {event_type}: "
-                        f"inserted={result.get('inserted', 0)}, "
-                        f"skipped={result.get('skipped', 0)} (duplicates), "
-                        f"failed={result.get('failed', 0)}"
+                        f"raw={raw}, inserted={inserted}, "
+                        f"skipped={skipped} (duplicates/invalid), "
+                        f"failed={failed}"
                     )
                     
+                    if inserted == 0 and skipped > 0 and failed == 0:
+                        logger.info(
+                            f"INFO {event_type}: no new rows inserted (all duplicates for selected range)"
+                        )
                 except Exception as e:
                     logger.error(f"❌ {event_type} failed: {str(e)}")
                     results[event_type] = {
@@ -198,6 +210,7 @@ def run_weekly_backfill():
             job.job_metadata = {
                 'start_date': start_str,
                 'end_date': end_str,
+                'total_raw': total_raw,
                 'total_skipped': total_skipped,
                 'results': results
             }
@@ -205,7 +218,8 @@ def run_weekly_backfill():
             
             logger.info(
                 f"✅ Weekly backfill completed: "
-                f"{total_inserted} inserted, {total_skipped} skipped (duplicates), "
+                f"raw={total_raw}, {total_inserted} inserted, "
+                f"{total_skipped} skipped (duplicates/invalid), "
                 f"{total_failed} failed"
             )
             
@@ -213,6 +227,7 @@ def run_weekly_backfill():
                 'success': True,
                 'start_date': start_str,
                 'end_date': end_str,
+                'total_raw': total_raw,
                 'total_inserted': total_inserted,
                 'total_skipped': total_skipped,
                 'total_failed': total_failed,

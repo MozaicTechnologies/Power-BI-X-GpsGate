@@ -1025,10 +1025,26 @@ def build_weekly_schedule(start_date_str):
     return weeks
 
 def resolve_weeks(data, max_weeks):
-    if data.get("period_start") and data.get("period_end"):
-        start = data["period_start"][:10]
-        return build_weekly_schedule(start)[:max_weeks]
-    return build_weekly_schedule("2025-01-01")[:max_weeks]
+    """
+    Resolve processing windows.
+
+    If caller provides an explicit period_start/period_end (daily/weekly jobs do),
+    process that exact range as a single window.
+    """
+    period_start = data.get("period_start")
+    period_end = data.get("period_end")
+
+    if period_start and period_end:
+        return [{
+            "week_start": period_start,
+            "week_end": period_end,
+        }]
+
+    windows = build_weekly_schedule("2025-01-01")
+    if max_weeks and max_weeks > 0:
+        # Use most recent windows when no explicit range is supplied.
+        return windows[-max_weeks:]
+    return windows
 
 # ------------------------------------------------------------------------------
 # DOWNLOAD WITH RETRY

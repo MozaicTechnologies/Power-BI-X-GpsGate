@@ -159,7 +159,9 @@ def run_daily_sync():
             ]
             
             results = {}
+            total_raw = 0
             total_inserted = 0
+            total_skipped = 0
             total_failed = 0
             
             for event_type in event_types:
@@ -175,18 +177,22 @@ def run_daily_sync():
                     
                     results[event_type] = {
                         'status': 'success',
+                        'raw': result.get('raw', 0),
                         'inserted': result.get('inserted', 0),
                         'skipped': result.get('skipped', 0),
                         'failed': result.get('failed', 0)
                     }
                     
+                    total_raw += result.get('raw', 0)
                     total_inserted += result.get('inserted', 0)
+                    total_skipped += result.get('skipped', 0)
                     total_failed += result.get('failed', 0)
                     
                     logger.info(
                         f"✅ {event_type}: "
+                        f"raw={result.get('raw', 0)}, "
                         f"inserted={result.get('inserted', 0)}, "
-                        f"skipped={result.get('skipped', 0)}, "
+                        f"skipped={result.get('skipped', 0)} (duplicates/invalid), "
                         f"failed={result.get('failed', 0)}"
                     )
                     
@@ -205,20 +211,25 @@ def run_daily_sync():
             job.job_metadata = {
                 'date': start_date,
                 'dimension_records': dimension_records,
+                'total_raw': total_raw,
+                'total_skipped': total_skipped,
                 'fact_results': results
             }
             db.session.commit()
             
             logger.info(
                 f"✅ Daily sync completed: "
-                f"dimensions={dimension_records}, facts={total_inserted} inserted, {total_failed} failed"
+                f"dimensions={dimension_records}, raw={total_raw}, "
+                f"facts inserted={total_inserted}, skipped={total_skipped}, failed={total_failed}"
             )
             
             return {
                 'success': True,
                 'date': start_date,
                 'dimension_records': dimension_records,
+                'total_raw': total_raw,
                 'total_inserted': total_inserted,
+                'total_skipped': total_skipped,
                 'total_failed': total_failed,
                 'results': results
             }
