@@ -757,6 +757,7 @@
 
 
 """
+data_pipeline.py - 
 Data Pipeline for Fleet Dashboard (FINAL STABLE VERSION)
 Handles: reports, event rules, weekly rendering, CSV parsing,
 retry-safe downloads, and DB insertion.
@@ -930,7 +931,7 @@ RESILIENT_SESSION = create_resilient_session()
 #     logger.error("CSV decode failed for all encodings tried")
 #     return None
 
-
+#data_pipeline.py - 
 import io
 import pandas as pd
 
@@ -1076,20 +1077,27 @@ def process_event_data(event_name, response_key):
     logger.info(f"START event={event_name}")
     logger.debug(f"Payload={json.dumps(data, default=str)}")
 
-    app_id = data.get("app_id")
-    token = data.get("token")
+    app_id   = data.get("app_id")
+    token    = data.get("token")
     base_url = data.get("base_url")
-    tag_id = data.get("tag_id")
+    tag_id   = data.get("tag_id")
     event_id = data.get("event_id")
 
-    # Primary report IDs
-    report_id = "1225" if event_name == "Trip" else "25"
+    # report_id comes from the payload (set per-customer in customer_configs)
+    # NEVER hardcode this — it differs per customer and per event type
+    report_id = data.get("report_id")
+    if not report_id:
+        logger.error("Missing report_id in payload — cannot proceed")
+        return jsonify({"error": "Missing report_id"}), 400
     
-    # Fallback report IDs - only use VERIFIED IDs from your system
-    fallback_report_ids = {
-        "Trip": ["1225", "25"],  # Try 1225 first, then fall back to 25 
-        "default": ["25"]        # All events work with 25
-    }
+    # No fallback list needed — payload always has the correct ID
+    report_ids_to_try = [report_id]
+
+    # # Fallback report IDs - only use VERIFIED IDs from your system
+    # fallback_report_ids = {
+    #     "Trip": ["1225", "25"],  # Try 1225 first, then fall back to 25 
+    #     "default": ["25"]        # All events work with 25
+    # }
 
     if not all([app_id, token, base_url, tag_id]):
         logger.error("Missing required parameters")
@@ -1104,10 +1112,11 @@ def process_event_data(event_name, response_key):
             render_id = None
             successful_report_id = None
             
+            # report_ids_to_try is already set above from payload
             # Try primary report ID first, then fallbacks
-            report_ids_to_try = fallback_report_ids.get(event_name, fallback_report_ids["default"])
-            if report_id not in report_ids_to_try:
-                report_ids_to_try = [report_id] + report_ids_to_try
+            # report_ids_to_try = fallback_report_ids.get(event_name, fallback_report_ids["default"])
+            # if report_id not in report_ids_to_try:
+            #     report_ids_to_try = [report_id] + report_ids_to_try
             
             for try_report_id in report_ids_to_try:
                 logger.info(f"Trying report_id={try_report_id} for event={event_name}")

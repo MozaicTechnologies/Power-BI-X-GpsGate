@@ -1,3 +1,4 @@
+#wsgi.py -
 from application import create_app
 
 # Create app with all blueprints already registered

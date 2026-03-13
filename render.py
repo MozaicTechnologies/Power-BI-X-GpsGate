@@ -229,7 +229,7 @@
 #         return jsonify({"error": "Render service error", "details": str(e)}), 500
 
 
-
+#render.py - 
 import time
 import requests
 from flask import Blueprint, request, jsonify
@@ -284,10 +284,30 @@ def render_report():
         "Authorization": token
     }
 
+    # body = {
+    #     "periodStart": period_start,
+    #     "periodEnd": period_end,
+    #     "reportFormatId": 2,
+    #     "sendEmail": False
+    # }
+
+    # Look up the correct reportFormatId from dim_reports
+    from models import DimReport
+    report_format_id = 1  # safe default
+    try:
+        dim = DimReport.query.filter_by(id=int(report_id), app_id=str(app_id)).first()
+        if dim and dim.report_format_id:
+            report_format_id = dim.report_format_id
+            print(f"[RENDER] Using report_format_id={report_format_id} from dim_reports")
+        else:
+            print(f"[RENDER] WARNING: report_format_id not found in dim_reports for report_id={report_id}, using default=1")
+    except Exception as e:
+        print(f"[RENDER] WARNING: Could not look up report_format_id: {e}, using default=1")
+
     body = {
         "periodStart": period_start,
         "periodEnd": period_end,
-        "reportFormatId": 2,
+        "reportFormatId": report_format_id,
         "sendEmail": False
     }
     

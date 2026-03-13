@@ -39,7 +39,7 @@
     #     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     #------------------------------------------------------------
-
+#config.py - 
 import os
 
 class Config:

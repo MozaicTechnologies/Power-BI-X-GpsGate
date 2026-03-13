@@ -220,15 +220,84 @@
 #     __table_args__ = (
 #         db.UniqueConstraint('app_id', 'event_date', 'event_time', 'vehicle', name='uq_fact_wu'),
 #     )
-
+# model.py - 
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 
 db = SQLAlchemy()
 
+
 # ------------------------------------------------------------------
 # RENDER / RESULT
 # ------------------------------------------------------------------
+
+class CustomerConfig(db.Model):
+    """
+    One row per customer/tenant.
+    All IDs are looked up by keyword from dim_* tables via setup_customer_ids.py
+    and stored here — nothing is hardcoded in the sync scripts.
+    """
+    __tablename__ = "customer_configs"
+ 
+    id              = db.Column(db.Integer, primary_key=True)
+    app_id          = db.Column(db.String(100), unique=True, nullable=False)
+    name            = db.Column(db.String(200))
+    token           = db.Column(db.Text, nullable=False)
+    base_url        = db.Column(db.Text, nullable=False, default="https://omantracking2.com")
+    tag_id          = db.Column(db.String(50))
+    is_active       = db.Column(db.Boolean, default=True)
+    created_at      = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at      = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+ 
+    # Report IDs — set by setup_customer_ids.py
+    trip_report_id  = db.Column(db.String(50))   # e.g. "Trip and Idle (Tag)-BI Format"
+    event_report_id = db.Column(db.String(50))   # e.g. "BI - Event Rule" / "Event Rule detailed (Tag)"
+ 
+    # Event Rule IDs — set by setup_customer_ids.py via keyword match
+    event_id_speed  = db.Column(db.String(50))   # Over Speeding +150km/h
+    event_id_idle   = db.Column(db.String(50))   # 30 min idle
+    event_id_awh    = db.Column(db.String(50))   # After Working Hours Usage
+    event_id_ha     = db.Column(db.String(50))   # Harsh Acceleration
+    event_id_hb     = db.Column(db.String(50))   # Harsh Braking
+    event_id_hc     = db.Column(db.String(50))   # Harsh Cornering
+    event_id_wu     = db.Column(db.String(50))   # Weekend Usage
+    event_id_wh     = db.Column(db.String(50))   # Working Hours Usage
+ 
+    def __repr__(self):
+        return f"<CustomerConfig app_id={self.app_id} name={self.name}>"
+ 
+    def to_dict(self):
+        """Returns customer data — token excluded for security."""
+        return {
+            "id":              self.id,
+            "app_id":          self.app_id,
+            "name":            self.name,
+            "base_url":        self.base_url,
+            "tag_id":          self.tag_id,
+            "is_active":       self.is_active,
+            "trip_report_id":  self.trip_report_id,
+            "event_report_id": self.event_report_id,
+            "event_id_speed":  self.event_id_speed,
+            "event_id_idle":   self.event_id_idle,
+            "event_id_awh":    self.event_id_awh,
+            "event_id_ha":     self.event_id_ha,
+            "event_id_hb":     self.event_id_hb,
+            "event_id_hc":     self.event_id_hc,
+            "event_id_wu":     self.event_id_wu,
+            "event_id_wh":     self.event_id_wh,
+            "created_at":      self.created_at.isoformat() if self.created_at else None,
+        }
+class DimReport(db.Model):
+    __tablename__ = "dim_reports"
+
+    id               = db.Column(db.Integer, primary_key=True)
+    application_id   = db.Column(db.Integer)
+    name             = db.Column(db.String(255))
+    app_id           = db.Column(db.String(50))
+    report_format_id = db.Column(db.Integer)
+
+    def __repr__(self):
+        return f"<DimReport id={self.id} name={self.name} format_id={self.report_format_id}>"
 
 class Render(db.Model):
     __tablename__ = "render"

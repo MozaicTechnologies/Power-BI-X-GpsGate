@@ -1,3 +1,4 @@
+#clear_fact_tables_only.py - 
 #!/usr/bin/env python
 """Clear only fact tables (keep render and result tables)"""
 

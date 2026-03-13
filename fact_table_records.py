@@ -37,6 +37,7 @@
 
 
 #!/usr/bin/env python
+#fact_table_records.py - 
 """Get record counts from fact tables (raw SQL - accurate)"""
 
 import sys

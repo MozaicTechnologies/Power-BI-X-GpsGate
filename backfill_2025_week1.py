@@ -1,263 +1,8 @@
-# #!/usr/bin/env python
-# """
-# Backfill for 2025 Week 1 using cached render/result data
-# Fetch all 8 events for January 1-7, 2025
-# """
-# import os
-# import sys
-# import traceback
-# import json
-# from datetime import datetime, timedelta
-
-# try:
-#     print("[BACKFILL_2025] Script started", flush=True)
-#     sys.stderr.write("[BACKFILL_2025] Script started (stderr)\n")
-#     sys.stderr.flush()
-    
-#     print(f"[BACKFILL_2025] Python version: {sys.version}", flush=True)
-#     print(f"[BACKFILL_2025] Python executable: {sys.executable}", flush=True)
-
-#     # IMPORTANT: Disable BACKFILL_MODE so we use /render -> /result -> download flow
-#     # This allows us to use the cached render/result data
-#     os.environ['BACKFILL_MODE'] = 'false'
-#     print("[BACKFILL_2025] Set BACKFILL_MODE=false to use render/result cache", flush=True)
-    
-#     # Disable FETCH_CURRENT_WEEK so we use historical data (2025)
-#     os.environ['FETCH_CURRENT_WEEK'] = 'false'
-#     print("[BACKFILL_2025] Set FETCH_CURRENT_WEEK=false to fetch historical data", flush=True)
-
-#     from dotenv import load_dotenv
-
-#     # Load .env first
-#     print("[BACKFILL_2025] Loading .env file...", flush=True)
-#     load_dotenv()
-#     print("[BACKFILL_2025] .env loaded", flush=True)
-
-#     print("[BACKFILL_2025] Creating Flask app...", flush=True)
-#     from application import create_app
-#     from data_pipeline import process_event_data
-#     from flask import request
-    
-#     print("[BACKFILL_2025] Imports successful", flush=True)
-
-# except Exception as e:
-#     error_msg = f"[BACKFILL_2025] FATAL ERROR during import: {str(e)}\n{traceback.format_exc()}"
-#     print(error_msg, flush=True)
-#     sys.stderr.write(error_msg + "\n")
-#     sys.stderr.flush()
-#     sys.exit(1)
-
-# app = create_app()
-# print("[BACKFILL_2025] Flask app created", flush=True)
-
-# # Configuration
-# print("[BACKFILL_2025] FETCH_CURRENT_WEEK=False")
-# print("[BACKFILL_2025] Using historical schedule starting from 2025-01-01")
-
-# # Check if we're using the correct database
-# from config import Config
-# print(f"[BACKFILL_2025] Database: {Config.SQLALCHEMY_DATABASE_URI.split('@')[1] if '@' in Config.SQLALCHEMY_DATABASE_URI else 'local'}")
-
-# # Endpoints configuration matching the API
-# ENDPOINTS = [
-#     {
-#         "name": "Trip",
-#         "key": "trip_events",
-#         "app_id": "6",
-#         "token": "v2:MDAwMDAyODkwMDozOWM1MzQ1YWU2N2I4YWQ3MThhZA==",
-#         "base_url": "https://omantracking2.com",
-#         "report_id": "1225",
-#         "tag_id": "39",
-#         "event_id": None  # Trip doesn't have event_id
-#     },
-#     {
-#         "name": "Speeding",
-#         "key": "speed_events",
-#         "app_id": "6",
-#         "token": "v2:MDAwMDAyODkwMDozOWM1MzQ1YWU2N2I4YWQ3MThhZA==",
-#         "base_url": "https://omantracking2.com",
-#         "report_id": "25",
-#         "tag_id": "39",
-#         "event_id": "18"
-#     },
-#     {
-#         "name": "Idle",
-#         "key": "idle_events",
-#         "app_id": "6",
-#         "token": "v2:MDAwMDAyODkwMDozOWM1MzQ1YWU2N2I4YWQ3MThhZA==",
-#         "base_url": "https://omantracking2.com",
-#         "report_id": "25",
-#         "tag_id": "39",
-#         "event_id": "1328"
-#     },
-#     {
-#         "name": "AWH",
-#         "key": "awh_events",
-#         "app_id": "6",
-#         "token": "v2:MDAwMDAyODkwMDozOWM1MzQ1YWU2N2I4YWQ3MThhZA==",
-#         "base_url": "https://omantracking2.com",
-#         "report_id": "25",
-#         "tag_id": "39",
-#         "event_id": "12"
-#     },
-#     {
-#         "name": "WH",
-#         "key": "wh_events",
-#         "app_id": "6",
-#         "token": "v2:MDAwMDAyODkwMDozOWM1MzQ1YWU2N2I4YWQ3MThhZA==",
-#         "base_url": "https://omantracking2.com",
-#         "report_id": "25",
-#         "tag_id": "39",
-#         "event_id": "13"
-#     },
-#     {
-#         "name": "HA",
-#         "key": "ha_events",
-#         "app_id": "6",
-#         "token": "v2:MDAwMDAyODkwMDozOWM1MzQ1YWU2N2I4YWQ3MThhZA==",
-#         "base_url": "https://omantracking2.com",
-#         "report_id": "25",
-#         "tag_id": "39",
-#         "event_id": "1327"
-#     },
-#     {
-#         "name": "HB",
-#         "key": "hb_events",
-#         "app_id": "6",
-#         "token": "v2:MDAwMDAyODkwMDozOWM1MzQ1YWU2N2I4YWQ3MThhZA==",
-#         "base_url": "https://omantracking2.com",
-#         "report_id": "25",
-#         "tag_id": "39",
-#         "event_id": "1326"
-#     },
-#     {
-#         "name": "WU",
-#         "key": "wu_events",
-#         "app_id": "6",
-#         "token": "v2:MDAwMDAyODkwMDozOWM1MzQ1YWU2N2I4YWQ3MThhZA==",
-#         "base_url": "https://omantracking2.com",
-#         "report_id": "25",
-#         "tag_id": "39",
-#         "event_id": "17"
-#     }
-# ]
-
-# print("\n" + "=" * 80)
-# print("BACKFILL - 2025 WEEK 1 (Jan 1 - Jan 7, 2025)")
-# print("=" * 80)
-
-
-# # Allow week_start and week_end as command-line arguments
-# import argparse
-# parser = argparse.ArgumentParser(description="Backfill for a specific week in 2025")
-# parser.add_argument('--week_start', type=str, default='2025-01-08', help='Start date (YYYY-MM-DD)')
-# parser.add_argument('--week_end', type=str, default='2025-01-15', help='End date (YYYY-MM-DD, exclusive)')
-# args = parser.parse_args()
-
-# week_start = datetime.strptime(args.week_start, "%Y-%m-%d")
-# week_end = datetime.strptime(args.week_end, "%Y-%m-%d")
-
-# print(f"\nUsing start date: {week_start.date()}")
-# print(f"Data will be fetched for: {week_start.date()} to {week_end.date()}")
-
-# total_rows = 0
-# total_inserted = 0
-# total_failed = 0
-# total_raw = 0
-# total_internal_dupes = 0
-# total_db_dupes = 0
-
-# print(f"\nProcessing {len(ENDPOINTS)} events...\n")
-
-# for i, endpoint in enumerate(ENDPOINTS, 1):
-#     event_type = endpoint["name"]
-#     response_key = endpoint["key"]
-    
-#     print(f"[{i}/8] {event_type}")
-#     print("-" * 80)
-    
-#     # Prepare payload matching process_event_data signature
-#     payload = {
-#         "app_id": endpoint["app_id"],
-#         "token": endpoint["token"],
-#         "base_url": endpoint["base_url"],
-#         "report_id": endpoint["report_id"],
-#         "tag_id": endpoint["tag_id"],
-#         "period_start": f"{week_start.isoformat()}Z",
-#         "period_end": f"{week_end.isoformat()}Z"
-#     }
-    
-#     if endpoint["event_id"]:
-#         payload["event_id"] = endpoint["event_id"]
-    
-#     print(f"\nREQUEST PAYLOAD:")
-#     print(json.dumps(payload, indent=2))
-    
-#     # Call process_event_data within Flask request context
-#     with app.test_request_context(
-#         '/endpoint',
-#         method='POST',
-#         data=json.dumps(payload),
-#         content_type='application/json'
-#     ):
-#         try:
-#             response_data, status_code = process_event_data(event_type, response_key)
-            
-#             if isinstance(response_data, tuple):
-#                 response_data = response_data[0]
-            
-#             result = response_data.get_json() if hasattr(response_data, 'get_json') else response_data
-            
-#             rows = len(result.get(response_key, [])) if isinstance(result, dict) else 0
-#             db_stats = result.get('db_stats', {}) if isinstance(result, dict) else {}
-#             accounting = result.get('accounting', {}) if isinstance(result, dict) else {}
-            
-#             raw_fetched = accounting.get('raw_fetched', 0)
-#             internal_dupes = accounting.get('internal_dupes_removed', 0)
-#             rows_after_dedup = accounting.get('rows_after_dedup', 0)
-#             db_dupes_flagged = accounting.get('db_duplicates_flagged', 0)
-#             db_failed = accounting.get('db_failed', 0)
-#             total_db_inserted = accounting.get('total_inserted', 0)
-            
-#             print(f"\n  Status: OK (HTTP {status_code})")
-#             print(f"  Fetched (raw): {raw_fetched:,}")
-#             print(f"  Internal Dupes Removed: {internal_dupes:,}")
-#             print(f"  After Dedup: {rows_after_dedup:,}")
-#             print(f"  DB-Level Dupes Flagged: {db_dupes_flagged:,}")
-#             print(f"  DB Failed: {db_failed:,}")
-#             print(f"  Total Inserted: {total_db_inserted:,}")
-            
-#             total_rows += rows
-#             total_inserted += db_stats.get('inserted', 0)
-#             total_failed += db_stats.get('failed', 0)
-#             total_raw += raw_fetched
-#             total_internal_dupes += internal_dupes
-#             total_db_dupes += db_dupes_flagged
-            
-#         except Exception as e:
-#             print(f"\n  ERROR: {e}")
-#             import traceback
-#             print(traceback.format_exc())
-    
-#     print()
-
-# print("\n" + "=" * 80)
-# print("COMPLETE ROW ACCOUNTING ACROSS ALL 8 ENDPOINTS")
-# print("=" * 80)
-# print(f"Total Raw Rows Fetched from API:           {total_raw:>10,}")
-# print(f"  - Internal Duplicates Removed (CSV):   -{total_internal_dupes:>10,}")
-# print(f"  = Rows After Deduplication:             {total_raw - total_internal_dupes:>10,}")
-# print(f"  - Database-Level Duplicates (flagged):  -{total_db_dupes:>10,}")
-# print(f"  = TOTAL INSERTED TO DB:                 {total_inserted:>10,}")
-# print("=" * 80)
-# print(f"Database Records: {total_inserted:,} inserted, {total_failed:,} errors")
-# print("=" * 80)
-
-
-#!/usr/bin/env python
 """
-Backfill script with dynamic date support.
-Fetches data ONLY for the provided date range.
+backfill_2025_week1.py  (MULTI-TENANT VERSION)
+===============================================
+All IDs (report_id, tag_id, event_ids) are read from
+customer_configs — nothing is hardcoded.
 """
 
 import os
@@ -267,18 +12,12 @@ import argparse
 import traceback
 from datetime import datetime
 
-# ------------------------------------------------------------------
-# ENV CONFIG — force pipeline to use historical + render/result cache
-# ------------------------------------------------------------------
-os.environ["BACKFILL_MODE"] = "false"
-os.environ["FETCH_CURRENT_WEEK"] = "false"
+os.environ["BACKFILL_MODE"]        = "false"
+os.environ["FETCH_CURRENT_WEEK"]   = "false"
 
-print("[BACKFILL] Starting backfill with dynamic dates", flush=True)
+print("[BACKFILL] Starting multi-tenant backfill", flush=True)
 print(f"[BACKFILL] Python: {sys.version}", flush=True)
 
-# ------------------------------------------------------------------
-# LOAD ENV & APP
-# ------------------------------------------------------------------
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -287,79 +26,74 @@ from data_pipeline import process_event_data
 
 app = create_app()
 
-# ------------------------------------------------------------------
-# CLI ARGUMENTS (SINGLE SOURCE OF TRUTH)
-# ------------------------------------------------------------------
-parser = argparse.ArgumentParser(description="Dynamic Backfill Script")
-
-parser.add_argument(
-    "--week_start",
-    required=True,
-    help="Start date (YYYY-MM-DD)"
-)
-
-parser.add_argument(
-    "--week_end",
-    required=True,
-    help="End date (YYYY-MM-DD, exclusive)"
-)
-
+parser = argparse.ArgumentParser(description="Multi-Tenant Dynamic Backfill Script")
+parser.add_argument("--week_start", required=True, help="Start date (YYYY-MM-DD)")
+parser.add_argument("--week_end",   required=True, help="End date (YYYY-MM-DD, inclusive)")
+parser.add_argument("--app_id",     required=False, default=None,
+                    help="(Optional) Run for a single customer app_id only.")
 args = parser.parse_args()
 
 week_start = datetime.strptime(args.week_start, "%Y-%m-%d")
-week_end = datetime.strptime(args.week_end, "%Y-%m-%d")
+week_end   = datetime.strptime(args.week_end,   "%Y-%m-%d")
 
-print(f"[BACKFILL] Date range: {week_start.date()} → {week_end.date()}")
+print(f"[BACKFILL] Date range : {week_start.date()} -> {week_end.date()}", flush=True)
+if args.app_id:
+    print(f"[BACKFILL] Filtering  : app_id={args.app_id}", flush=True)
+else:
+    print("[BACKFILL] Running for : ALL active customers", flush=True)
 
 # ------------------------------------------------------------------
-# ENDPOINT CONFIG (UNCHANGED)
+# ENDPOINTS — names and keys only, NO hardcoded IDs
+# event_id_col maps to the column name in customer_configs
 # ------------------------------------------------------------------
 ENDPOINTS = [
-    {"name": "Trip", "key": "trip_events", "event_id": None},
-    {"name": "Speeding", "key": "speed_events", "event_id": "18"},
-    {"name": "Idle", "key": "idle_events", "event_id": "1328"},
-    {"name": "AWH", "key": "awh_events", "event_id": "12"},
-    {"name": "WH", "key": "wh_events", "event_id": "13"},
-    {"name": "HA", "key": "ha_events", "event_id": "1327"},
-    {"name": "HB", "key": "hb_events", "event_id": "1326"},
-    {"name": "WU", "key": "wu_events", "event_id": "17"},
+    {"name": "Trip",     "key": "trip_events",  "event_id_col": None},
+    {"name": "Speeding", "key": "speed_events", "event_id_col": "event_id_speed"},
+    {"name": "Idle",     "key": "idle_events",  "event_id_col": "event_id_idle"},
+    {"name": "AWH",      "key": "awh_events",   "event_id_col": "event_id_awh"},
+    {"name": "WH",       "key": "wh_events",    "event_id_col": "event_id_wh"},
+    {"name": "HA",       "key": "ha_events",    "event_id_col": "event_id_ha"},
+    {"name": "HB",       "key": "hb_events",    "event_id_col": "event_id_hb"},
+    {"name": "WU",       "key": "wu_events",    "event_id_col": "event_id_wu"},
 ]
 
-# Load environment variables
-import os
-from dotenv import load_dotenv
-load_dotenv()
 
-COMMON_CONFIG = {
-    "app_id": "6",
-    "token": os.getenv("TOKEN"),
-    "base_url": os.getenv("BASE_URL", "https://omantracking2.com"),
-    "report_id": "25",
-    "tag_id": "39",
-}
+def load_customers(app_id_filter=None):
+    from models import CustomerConfig
+    query = CustomerConfig.query.filter_by(is_active=True)
+    if app_id_filter:
+        query = query.filter_by(app_id=str(app_id_filter))
+    customers = query.order_by(CustomerConfig.id).all()
+    if not customers:
+        msg = f"app_id={app_id_filter}" if app_id_filter else "any active customer"
+        print(f"[BACKFILL] No active customer found for {msg}")
+    return customers
 
-# ------------------------------------------------------------------
-# EXECUTION
-# ------------------------------------------------------------------
-print("=" * 80)
-print("BACKFILL EXECUTION STARTED")
-print("=" * 80)
 
-for idx, ep in enumerate(ENDPOINTS, start=1):
-    print(f"\n[{idx}/8] Processing {ep['name']}")
-    print("-" * 80)
+def run_event_for_customer(customer, ep, week_start, week_end):
+    """
+    Builds payload entirely from customer object.
+    - Trip events  → uses customer.trip_report_id
+    - Other events → uses customer.event_report_id
+    - Event IDs    → read from customer.event_id_* columns
+    """
+    report_id = customer.trip_report_id if ep["name"] == "Trip" else customer.event_report_id
+    event_id  = getattr(customer, ep["event_id_col"], None) if ep["event_id_col"] else None
 
     payload = {
-        **COMMON_CONFIG,
+        "app_id":       customer.app_id,
+        "token":        customer.token,
+        "base_url":     customer.base_url,
+        "report_id":    report_id,
+        "tag_id":       customer.tag_id,
         "period_start": f"{week_start.strftime('%Y-%m-%d')}T00:00:00Z",
-        "period_end": f"{week_end.strftime('%Y-%m-%d')}T23:59:59Z",
+        "period_end":   f"{week_end.strftime('%Y-%m-%d')}T23:59:59Z",
     }
+    if event_id:
+        payload["event_id"] = event_id
 
-    if ep["event_id"]:
-        payload["event_id"] = ep["event_id"]
-
-    print("[REQUEST PAYLOAD]")
-    print(json.dumps(payload, indent=2))
+    print("\n[REQUEST PAYLOAD]")
+    print(json.dumps({**payload, "token": "***"}, indent=2))
 
     with app.test_request_context(
         "/internal-backfill",
@@ -369,31 +103,90 @@ for idx, ep in enumerate(ENDPOINTS, start=1):
     ):
         try:
             response, status = process_event_data(ep["name"], ep["key"])
+            result = response.get_json() if hasattr(response, "get_json") else response
+            return result.get("accounting", {})
+        except Exception as e:
+            print(f"[ERROR] process_event_data raised: {e}")
+            print(traceback.format_exc())
+            return {}
 
-            if hasattr(response, "get_json"):
-                result = response.get_json()
-            else:
-                result = response
 
-            accounting = result.get("accounting", {})
+# ------------------------------------------------------------------
+# EXECUTION
+# ------------------------------------------------------------------
+print("=" * 80)
+print("MULTI-TENANT BACKFILL EXECUTION STARTED")
+print("=" * 80)
 
-            # print("[RESULT]")
-            # print(f"  Raw fetched: {accounting.get('raw_fetched', 0)}")
-            # print(f"  Internal dupes removed: {accounting.get('internal_dupes_removed', 0)}")
-            # print(f"  DB duplicates flagged: {accounting.get('db_duplicates_flagged', 0)}")
-            # print(f"  Inserted: {accounting.get('total_inserted', 0)}")
+with app.app_context():
+    customers = load_customers(app_id_filter=args.app_id)
+
+    if not customers:
+        print("[BACKFILL] Nothing to do. Exiting.")
+        sys.exit(0)
+
+    print(f"\n[BACKFILL] Customers to process: {len(customers)}")
+    for c in customers:
+        print(f"  - {c.name} (app_id={c.app_id})")
+        print(f"    tag_id={c.tag_id}  trip_report={c.trip_report_id}  event_report={c.event_report_id}")
+        print(f"    speed={c.event_id_speed}  idle={c.event_id_idle}  awh={c.event_id_awh}")
+        print(f"    ha={c.event_id_ha}  hb={c.event_id_hb}  hc={c.event_id_hc}")
+        print(f"    wu={c.event_id_wu}  wh={c.event_id_wh}")
+
+    grand_totals = {"raw": 0, "inserted": 0, "skipped": 0, "failed": 0}
+
+    for customer in customers:
+        print(f"\n{'='*80}")
+        print(f"CUSTOMER: {customer.name}  (app_id={customer.app_id})")
+        print(f"{'='*80}")
+
+        # Validate required IDs exist before running
+        missing = [f for f, v in [
+            ("trip_report_id",  customer.trip_report_id),
+            ("event_report_id", customer.event_report_id),
+            ("tag_id",          customer.tag_id),
+        ] if not v]
+
+        if missing:
+            print(f"[BACKFILL] Skipping {customer.name} — missing config: {missing}")
+            print(f"[BACKFILL] Run: python setup_customer_ids.py")
+            continue
+
+        customer_totals = {"raw": 0, "inserted": 0, "skipped": 0, "failed": 0}
+
+        for idx, ep in enumerate(ENDPOINTS, start=1):
+            print(f"\n[{idx}/{len(ENDPOINTS)}] {customer.name} -> {ep['name']}")
+            print("-" * 60)
+
+            accounting = run_event_for_customer(customer, ep, week_start, week_end)
+
+            raw      = accounting.get("raw", 0)
+            inserted = accounting.get("inserted", 0)
+            skipped  = accounting.get("skipped", 0)
+            failed   = accounting.get("failed", 0)
 
             print("[RESULT]")
-            print(f"  Raw fetched: {accounting.get('raw', 0)}")
-            print(f"  Inserted: {accounting.get('inserted', 0)}")
-            print(f"  Skipped: {accounting.get('skipped', 0)}")
-            print(f"  Failed: {accounting.get('failed', 0)}")
+            print(f"  Raw fetched : {raw}")
+            print(f"  Inserted    : {inserted}")
+            print(f"  Skipped     : {skipped}")
+            print(f"  Failed      : {failed}")
 
+            for k in customer_totals:
+                customer_totals[k] += accounting.get(k, 0)
 
-        except Exception as e:
-            print("[ERROR] Backfill failed")
-            print(traceback.format_exc())
+        print(f"\n{'─'*60}")
+        print(f"CUSTOMER SUMMARY: {customer.name}")
+        for k, v in customer_totals.items():
+            print(f"  {k.capitalize():<10}: {v}")
+        print(f"{'─'*60}")
+
+        for k in grand_totals:
+            grand_totals[k] += customer_totals[k]
 
 print("\n" + "=" * 80)
+print("GRAND TOTAL (ALL CUSTOMERS)")
+for k, v in grand_totals.items():
+    print(f"  {k.capitalize():<10}: {v}")
+print("=" * 80)
 print("BACKFILL COMPLETE")
 print("=" * 80)
