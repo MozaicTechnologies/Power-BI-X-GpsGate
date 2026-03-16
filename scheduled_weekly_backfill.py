@@ -1,265 +1,180 @@
 #!/usr/bin/env python
-"""
-Scheduled Weekly Backfill Job
-Runs every Sunday at 3 AM UTC
-Backfills last 7 days of data for reconciliation
-"""
+"""Scheduled weekly backfill job using customer_config runtime values."""
 
-import sys
 import os
+import sys
 import json
-from datetime import datetime, timedelta
 import traceback
+from datetime import datetime, timedelta
+
+from dotenv import load_dotenv
+
 
 print(f"[WEEKLY_BACKFILL] Starting scheduled weekly backfill at {datetime.utcnow()}")
 print(f"[WEEKLY_BACKFILL] Python executable: {sys.executable}")
 print(f"[WEEKLY_BACKFILL] Working directory: {os.getcwd()}")
 print(f"[WEEKLY_BACKFILL] Script path: {os.path.abspath(__file__)}")
 
-try:
-    from dotenv import load_dotenv
-    print("[WEEKLY_BACKFILL] dotenv imported successfully")
-    
-    # Load environment variables
-    load_dotenv()
-    print("[WEEKLY_BACKFILL] Environment variables loaded")
-    
-    # Add current directory to path
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    print("[WEEKLY_BACKFILL] Path updated")
-    
-    from application import create_app, db
-    from models import JobExecution
-    from logger_config import get_logger
-    from data_pipeline import process_event_data
-    from config import Config
-    print("[WEEKLY_BACKFILL] All imports successful")
-    
-    logger = get_logger(__name__)
-    
-except Exception as e:
-    print(f"[WEEKLY_BACKFILL] FATAL ERROR during imports: {str(e)}")
-    print(f"[WEEKLY_BACKFILL] Traceback: {traceback.format_exc()}")
-    sys.exit(1)
+load_dotenv()
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from application import create_app, db
+from config import Config
+from customer_runtime_config import EVENT_CONFIG, get_event_runtime_config, load_customers
+from data_pipeline import process_event_data
+from logger_config import get_logger
+from models import JobExecution
+
 
 logger = get_logger(__name__)
 
-# Event type to API configuration mapping (MATCHES working backfill script)
-EVENT_CONFIG = {
-    'Trip': {'report_id': '25', 'event_id': None, 'response_key': 'trip_events'},
-    'Speeding': {'report_id': '25', 'event_id': '18', 'response_key': 'speed_events'},
-    'Idle': {'report_id': '25', 'event_id': '1328', 'response_key': 'idle_events'},
-    'AWH': {'report_id': '25', 'event_id': '12', 'response_key': 'awh_events'},
-    'WH': {'report_id': '25', 'event_id': '13', 'response_key': 'wh_events'},
-    'HA': {'report_id': '25', 'event_id': '1327', 'response_key': 'ha_events'},
-    'HB': {'report_id': '25', 'event_id': '1326', 'response_key': 'hb_events'},
-    'WU': {'report_id': '25', 'event_id': '17', 'response_key': 'wu_events'}
-}
 
+def process_event_with_dates(app, customer, event_type, start_date, end_date):
+    runtime = get_event_runtime_config(customer, event_type, Config.BASE_URL)
 
-def process_event_with_dates(app, event_type, start_date, end_date):
-    """
-    Helper function to process event data for a specific date range.
-    Creates Flask request context with proper payload.
-    """
-    if event_type not in EVENT_CONFIG:
-        raise ValueError(f"Unknown event type: {event_type}")
-    
-    config = EVENT_CONFIG[event_type]
-    
-    # Prepare payload matching process_event_data signature
     payload = {
-        "app_id": "6",
-        "token": Config.TOKEN,
-        "base_url": Config.BASE_URL,
-        "report_id": config['report_id'],
-        "tag_id": "39",  # Same as working backfill script
+        "app_id": runtime.app_id,
+        "token": runtime.token,
+        "base_url": runtime.base_url,
+        "report_id": runtime.report_id,
+        "tag_id": runtime.tag_id,
         "period_start": f"{start_date}T00:00:00Z",
-        "period_end": f"{end_date}T23:59:59Z"
+        "period_end": f"{end_date}T23:59:59Z",
     }
-    
-    if config['event_id']:
-        payload["event_id"] = config['event_id']
-    
-    # Call process_event_data within Flask request context
+    if runtime.event_id:
+        payload["event_id"] = runtime.event_id
+
     with app.test_request_context(
-        '/api/process',
-        method='POST',
+        "/api/process",
+        method="POST",
         data=json.dumps(payload),
-        content_type='application/json'
+        content_type="application/json",
     ):
-        # process_event_data returns (jsonify(...), status_code) tuple
         response_tuple = process_event_data(
             event_name=event_type,
-            response_key=config['response_key']
+            response_key=runtime.response_key,
         )
-        
-        # Extract the response object and JSON data
         if isinstance(response_tuple, tuple):
-            response_obj, status_code = response_tuple
-            # Get JSON data from response object
-            data = response_obj.get_json()
-            # Return the accounting/totals data
-            return data.get('accounting', {})
-        else:
-            # In case it's not a tuple (shouldn't happen, but safe fallback)
-            return response_tuple
+            response_obj, _status_code = response_tuple
+            return response_obj.get_json().get("accounting", {})
+        return response_tuple
 
 
 def run_weekly_backfill():
-    """
-    Weekly backfill workflow:
-    1. Calculate last 7 days date range
-    2. Process all 8 event types for the week
-    3. Upsert/reconcile data (handles duplicates via primary keys)
-    4. Record execution status
-    """
     app = create_app()
-    
+
     with app.app_context():
-        # Create job execution record
         job = JobExecution(
-            job_type='weekly_backfill',
-            status='running',
-            started_at=datetime.utcnow()
+            job_type="weekly_backfill",
+            status="running",
+            started_at=datetime.utcnow(),
         )
         db.session.add(job)
         db.session.commit()
-        
+
         try:
-            # Calculate last 7 days
             today = datetime.utcnow().date()
-            end_date = today - timedelta(days=1)  # Yesterday
-            start_date = end_date - timedelta(days=6)  # 7 days ago
-            
-            start_str = start_date.strftime('%Y-%m-%d')
-            end_str = end_date.strftime('%Y-%m-%d')
-            
-            logger.info(f"🚀 Starting weekly backfill: {start_str} to {end_str}")
-            
-            # Event types to process
-            event_types = [
-                'Trip',
-                'Speeding',
-                'Idle',
-                'AWH',  # After Work Hours
-                'WH',   # Work Hours
-                'HA',   # Harsh Acceleration
-                'HB',   # Harsh Braking
-                'WU'    # Weekend Usage
-            ]
-            
+            end_date = today - timedelta(days=1)
+            start_date = end_date - timedelta(days=6)
+            start_str = start_date.strftime("%Y-%m-%d")
+            end_str = end_date.strftime("%Y-%m-%d")
+
+            logger.info(f"Starting weekly backfill: {start_str} to {end_str}")
+
+            customers = load_customers()
+            if not customers:
+                raise RuntimeError("No customer_config rows found for weekly backfill")
+
+            event_types = list(EVENT_CONFIG.keys())
             results = {}
             total_raw = 0
             total_inserted = 0
             total_skipped = 0
             total_failed = 0
-            
-            for event_type in event_types:
-                logger.info(f"📊 Processing {event_type} for week...")
-                
-                try:
-                    result = process_event_with_dates(
-                        app=app,
-                        event_type=event_type,
-                        start_date=start_str,
-                        end_date=end_str
-                    )
-                    
-                    inserted = result.get('inserted', 0)
-                    skipped = result.get('skipped', 0)
-                    failed = result.get('failed', 0)
-                    raw = result.get('raw', 0)
 
-                    results[event_type] = {
-                        'status': 'success',
-                        'raw': raw,
-                        'inserted': inserted,
-                        'skipped': skipped,
-                        'failed': failed
-                    }
-                    
-                    total_raw += raw
-                    total_inserted += inserted
-                    total_skipped += skipped
-                    total_failed += failed
-                    
-                    logger.info(
-                        f"✅ {event_type}: "
-                        f"raw={raw}, inserted={inserted}, "
-                        f"skipped={skipped} (duplicates/invalid), "
-                        f"failed={failed}"
-                    )
-                    
-                    if inserted == 0 and skipped > 0 and failed == 0:
-                        logger.info(
-                            f"INFO {event_type}: no new rows inserted (all duplicates for selected range)"
+            for customer in customers:
+                app_results = {}
+                for event_type in event_types:
+                    logger.info(f"Processing app={customer.application_id} event={event_type}")
+                    try:
+                        result = process_event_with_dates(
+                            app=app,
+                            customer=customer,
+                            event_type=event_type,
+                            start_date=start_str,
+                            end_date=end_str,
                         )
-                except Exception as e:
-                    logger.error(f"❌ {event_type} failed: {str(e)}")
-                    results[event_type] = {
-                        'status': 'failed',
-                        'error': str(e)
-                    }
-            
-            # Update job execution record
-            job.status = 'completed'
+                        raw = result.get("raw", 0)
+                        inserted = result.get("inserted", 0)
+                        skipped = result.get("skipped", 0)
+                        failed = result.get("failed", 0)
+
+                        app_results[event_type] = {
+                            "status": "success",
+                            "raw": raw,
+                            "inserted": inserted,
+                            "skipped": skipped,
+                            "failed": failed,
+                        }
+
+                        total_raw += raw
+                        total_inserted += inserted
+                        total_skipped += skipped
+                        total_failed += failed
+                    except Exception as exc:
+                        logger.error(f"app={customer.application_id} {event_type} failed: {exc}")
+                        app_results[event_type] = {"status": "failed", "error": str(exc)}
+                        total_failed += 1
+
+                results[str(customer.application_id)] = app_results
+
+            job.status = "completed"
             job.completed_at = datetime.utcnow()
             job.records_processed = total_inserted
             job.errors = total_failed
             job.job_metadata = {
-                'start_date': start_str,
-                'end_date': end_str,
-                'total_raw': total_raw,
-                'total_skipped': total_skipped,
-                'results': results
+                "start_date": start_str,
+                "end_date": end_str,
+                "total_raw": total_raw,
+                "total_skipped": total_skipped,
+                "results": results,
+                "total_customers_processed": len(customers),
             }
             db.session.commit()
-            
+
             logger.info(
-                f"✅ Weekly backfill completed: "
-                f"raw={total_raw}, {total_inserted} inserted, "
-                f"{total_skipped} skipped (duplicates/invalid), "
-                f"{total_failed} failed"
+                "Weekly backfill completed: "
+                f"raw={total_raw}, inserted={total_inserted}, skipped={total_skipped}, failed={total_failed}"
             )
-            
             return {
-                'success': True,
-                'start_date': start_str,
-                'end_date': end_str,
-                'total_raw': total_raw,
-                'total_inserted': total_inserted,
-                'total_skipped': total_skipped,
-                'total_failed': total_failed,
-                'results': results
+                "success": True,
+                "start_date": start_str,
+                "end_date": end_str,
+                "total_raw": total_raw,
+                "total_inserted": total_inserted,
+                "total_skipped": total_skipped,
+                "total_failed": total_failed,
+                "results": results,
             }
-            
-        except Exception as e:
-            logger.error(f"❌ Weekly backfill failed: {str(e)}")
+        except Exception as exc:
+            logger.error(f"Weekly backfill failed: {exc}")
             logger.error(traceback.format_exc())
-            
-            # Update job execution record
-            job.status = 'failed'
+            job.status = "failed"
             job.completed_at = datetime.utcnow()
-            job.error_message = str(e)
-            job.job_metadata = {'traceback': traceback.format_exc()}
+            job.error_message = str(exc)
+            job.job_metadata = {"traceback": traceback.format_exc()}
             db.session.commit()
-            
             return {
-                'success': False,
-                'error': str(e),
-                'traceback': traceback.format_exc()
+                "success": False,
+                "error": str(exc),
+                "traceback": traceback.format_exc(),
             }
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     result = run_weekly_backfill()
-    
-    if result['success']:
-        print(f"✅ Weekly backfill completed successfully")
-        print(f"📊 Period: {result['start_date']} to {result['end_date']}")
-        print(f"📊 Inserted: {result['total_inserted']}")
-        print(f"📊 Skipped: {result['total_skipped']} (duplicates)")
+    if result["success"]:
+        print("Weekly backfill completed successfully")
         sys.exit(0)
-    else:
-        print(f"❌ Weekly backfill failed: {result['error']}")
-        sys.exit(1)
+    print(f"Weekly backfill failed: {result['error']}")
+    sys.exit(1)

@@ -231,6 +231,8 @@
 
 
 import time
+from urllib.parse import urljoin
+
 import requests
 from flask import Blueprint, request, jsonify
 
@@ -238,75 +240,168 @@ render_bp = Blueprint("render", __name__)
 
 DEFAULT_TIMEOUT = 45
 
+
+def _payload_dict():
+    """Accept JSON or x-www-form-urlencoded and normalize to a dict."""
+    data = request.get_json(silent=True)
+    if isinstance(data, dict):
+        return data
+    if request.form:
+        return request.form.to_dict(flat=True)
+    return {}
+
+
+def _headers(token: str, *, json_body: bool = False) -> dict:
+    headers = {
+        "Accept": "application/json",
+        "Authorization": token,
+    }
+    if json_body:
+        headers["Content-Type"] = "application/json"
+    return headers
+
+
+def _build_urls(base_url: str, app_id: str, report_id: str) -> tuple[str, str]:
+    base = base_url.rstrip("/") + "/"
+    report_url = urljoin(base, f"comGpsGate/api/v.1/applications/{app_id}/reports/{report_id}")
+    renderings_url = urljoin(base, f"comGpsGate/api/v.1/applications/{app_id}/reports/{report_id}/renderings")
+    return report_url, renderings_url
+
+
+def _coerce_id(value):
+    return str(value)
+
+
+def _merge_parameters(report_parameters, period_start, period_end, tag_id=None, event_id=None):
+    """
+    Merge caller inputs into the report model's parameter payload.
+    """
+    if not isinstance(report_parameters, list):
+        report_parameters = []
+
+    merged = []
+    for parameter in report_parameters:
+        if not isinstance(parameter, dict):
+            continue
+
+        merged_parameter = dict(parameter)
+        parameter_name = (merged_parameter.get("parameterName") or "").strip()
+        parameter_name_lower = parameter_name.lower()
+
+        if parameter_name_lower == "period":
+            merged_parameter["value"] = "Custom"
+            merged_parameter["periodStart"] = period_start
+            merged_parameter["periodEnd"] = period_end
+            merged_parameter["visible"] = merged_parameter.get("visible", False)
+
+        if tag_id:
+            looks_like_tag_parameter = (
+                "group" in parameter_name_lower
+                or "tag" in parameter_name_lower
+                or "view" in parameter_name_lower
+            )
+            if looks_like_tag_parameter and (
+                "arrayValues" in merged_parameter or merged_parameter.get("arrayValues") is not None
+            ):
+                merged_parameter["arrayValues"] = [_coerce_id(tag_id)]
+
+        if event_id:
+            looks_like_event_parameter = (
+                "event" in parameter_name_lower
+                and ("rule" in parameter_name_lower or "id" in parameter_name_lower)
+            )
+            if looks_like_event_parameter and (
+                "arrayValues" in merged_parameter or merged_parameter.get("arrayValues") is not None
+            ):
+                merged_parameter["arrayValues"] = [_coerce_id(event_id)]
+
+        merged.append(merged_parameter)
+
+    return merged
+
 @render_bp.route("/health")
 def health():
     return "ok"
 
 @render_bp.route("/render", methods=["POST"])
 def render_report():
-    """Handle render requests - accepts form data or JSON"""
-    # Accept both JSON and form data
-    if request.is_json:
-        payload = request.get_json()
-    else:
-        payload = request.form.to_dict()
+    """Handle render requests using the report model's parameter schema."""
+    payload = _payload_dict()
 
     print(f"[RENDER] Received payload keys: {sorted(list(payload.keys()))}")
 
-    # Required fields
     base_url = (payload.get("base_url") or "").strip().rstrip("/")
     app_id = payload.get("app_id")
     report_id = payload.get("report_id")
     token = payload.get("token")
     period_start = payload.get("period_start")
     period_end = payload.get("period_end")
-    
-    # Optional
     tag_id = payload.get("tag_id")
     event_id = payload.get("event_id")
 
-    if not all([base_url, app_id, report_id, token]):
+    if not all([base_url, app_id, report_id, token, period_start, period_end]):
         return jsonify({
             "ok": False,
-            "error": "Missing required fields: base_url, app_id, report_id, token",
+            "error": "Missing required fields: base_url, app_id, report_id, token, period_start, period_end",
             "received": sorted(list(payload.keys()))
         }), 400
 
-    url = f"{base_url}/comGpsGate/api/v.1/applications/{app_id}/reports/{report_id}/renderings"
-
-    # Debug: Log token info (masked)
     token_preview = f"{token[:10]}...{token[-10:]}" if len(token) > 20 else "SHORT_TOKEN"
     print(f"[RENDER] Using token: {token_preview} (length: {len(token)})")
-    
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "Authorization": token
-    }
+
+    report_url, renderings_url = _build_urls(str(base_url), str(app_id), str(report_id))
+    headers = _headers(str(token))
+
+    try:
+        report_resp = requests.get(report_url, headers=headers, timeout=(10, 30))
+    except Exception as exc:
+        return jsonify({
+            "ok": False,
+            "error": "Failed to read report model",
+            "details": str(exc),
+            "url": report_url,
+        }), 502
+
+    if report_resp.status_code != 200:
+        return jsonify({
+            "ok": False,
+            "error": "Failed to read report model",
+            "status": report_resp.status_code,
+            "url": report_url,
+            "response": (report_resp.text or "")[:800],
+        }), 502
+
+    report_model = report_resp.json() if report_resp.content else {}
+    report_parameters = report_model.get("parameters", [])
+    merged_parameters = _merge_parameters(
+        report_parameters=report_parameters,
+        period_start=period_start,
+        period_end=period_end,
+        tag_id=tag_id,
+        event_id=event_id,
+    )
 
     body = {
-        "periodStart": period_start,
-        "periodEnd": period_end,
-        "reportFormatId": 2,
-        "sendEmail": False
+        "reportId": _coerce_id(report_id),
+        "parameters": merged_parameters,
+        "reportFormatId": int(payload.get("reportFormatId") or 2),
+        "sendEmail": False,
     }
-    
-    # Add optional parameters if provided
-    if tag_id:
-        body["tagId"] = str(tag_id)
-    if event_id:
-        body["eventId"] = str(event_id)
 
-    print(f"[RENDER] Posting to: {url}")
+    print(f"[RENDER] Posting to: {renderings_url}")
     print(f"[RENDER] Body: {body}")
 
-    # Retry with backoff
     last_status = None
     last_body = None
 
     for attempt in range(1, 4):
         try:
-            resp = requests.post(url, headers=headers, json=body, timeout=DEFAULT_TIMEOUT)
+            resp = requests.post(
+                renderings_url,
+                headers=_headers(str(token), json_body=True),
+                json=body,
+                timeout=DEFAULT_TIMEOUT,
+            )
             last_status = resp.status_code
             last_body = resp.text
 
@@ -349,5 +444,6 @@ def render_report():
         "ok": False,
         "error": "Render failed",
         "status": last_status,
-        "response": last_body[:500] if last_body else None
+        "response": last_body[:500] if last_body else None,
+        "request_body": body,
     }), 502

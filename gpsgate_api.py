@@ -80,7 +80,7 @@ def render_endpoint(payload):
     
     Args:
         payload (dict): {
-            "app_id": "6",
+            "app_id": "93",
             "period_start": Unix timestamp (int) or ISO string,
             "period_end": Unix timestamp (int) or ISO string,
             "tag_id": "39",
@@ -203,7 +203,7 @@ def result_endpoint(payload):
     
     Args:
         payload (dict): {
-            "app_id": "6",
+            "app_id": "93",
             "render_id": "...",
             "token": "v2:...",
             "base_url": "https://omantracking2.com",

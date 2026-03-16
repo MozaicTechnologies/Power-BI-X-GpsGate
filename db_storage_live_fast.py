@@ -366,6 +366,7 @@
 import pandas as pd
 from datetime import datetime
 from sqlalchemy import text
+from sqlalchemy.exc import ResourceClosedError
 import logging
 from models import db
 
@@ -513,8 +514,11 @@ def store_event_data_to_db(df, app_id, tag_id, event_name):
 
     try:
         result = db.session.execute(text(sql), records)
-        # Count actual inserted rows; duplicates are excluded by ON CONFLICT DO NOTHING.
-        inserted = len(result.fetchall())
+        # Some SQLAlchemy/driver executemany paths close RETURNING results automatically.
+        try:
+            inserted = len(result.fetchall())
+        except ResourceClosedError:
+            inserted = result.rowcount if result.rowcount and result.rowcount > 0 else 0
         duplicate_skipped = max(0, len(records) - inserted)
         total_skipped = skipped + duplicate_skipped
         db.session.commit()

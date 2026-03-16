@@ -489,3 +489,24 @@ class JobExecution(db.Model):
             'metadata': self.job_metadata,
             'triggered_by': self.triggered_by
         }
+
+
+class CustomerConfig(db.Model):
+    """Per-application customer configuration for dynamic report and event IDs."""
+    __tablename__ = "customer_config"
+
+    application_id = db.Column(db.String(50), primary_key=True)
+    token = db.Column(db.Text, nullable=False)
+    tag_id = db.Column(db.String(50))
+
+    trip_report_id = db.Column(db.String(50))
+    event_report_id = db.Column(db.String(50))
+
+    awh_event_id = db.Column(db.String(50))
+    ha_event_id = db.Column(db.String(50))
+    hb_event_id = db.Column(db.String(50))
+    hc_event_id = db.Column(db.String(50))
+    wu_event_id = db.Column(db.String(50))
+    wh_event_id = db.Column(db.String(50))
+    speed_event_id = db.Column(db.String(50))
+    idle_event_id = db.Column(db.String(50))

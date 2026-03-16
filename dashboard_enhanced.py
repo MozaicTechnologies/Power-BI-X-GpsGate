@@ -8,7 +8,21 @@ from datetime import datetime, timedelta
 import traceback
 import threading
 import json
-from models import db, JobExecution, FactTrip, FactSpeeding, FactIdle, FactAWH, FactWH, FactHA, FactHB, FactWU
+import requests
+from models import (
+    db,
+    CustomerConfig,
+    JobExecution,
+    FactTrip,
+    FactSpeeding,
+    FactIdle,
+    FactAWH,
+    FactWH,
+    FactHA,
+    FactHB,
+    FactWU,
+)
+from customer_runtime_config import EVENT_CONFIG, get_event_runtime_config, load_customers
 from data_pipeline import process_event_data
 from logger_config import get_logger
 from config import Config
@@ -20,20 +34,42 @@ dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/dashboard')
 # Store active job threads
 active_jobs = {}
 
-# Event type to API configuration mapping (MATCHES backfill_2025_week1.py)
-EVENT_CONFIG = {
-    'Trip': {'report_id': '25', 'event_id': None, 'response_key': 'trip_events'},
-    'Speeding': {'report_id': '25', 'event_id': '18', 'response_key': 'speed_events'},
-    'Idle': {'report_id': '25', 'event_id': '1328', 'response_key': 'idle_events'},
-    'AWH': {'report_id': '25', 'event_id': '12', 'response_key': 'awh_events'},
-    'WH': {'report_id': '25', 'event_id': '13', 'response_key': 'wh_events'},
-    'HA': {'report_id': '25', 'event_id': '1327', 'response_key': 'ha_events'},
-    'HB': {'report_id': '25', 'event_id': '1326', 'response_key': 'hb_events'},
-    'WU': {'report_id': '25', 'event_id': '17', 'response_key': 'wu_events'}
-}
+
+def mask_token(token: str | None) -> str:
+    token = (token or "").strip()
+    if len(token) <= 10:
+        return token
+    return f"{token[:6]}...{token[-4:]}"
 
 
-def process_event_with_dates(app, event_type, start_date, end_date):
+def serialize_customer_config(customer: CustomerConfig) -> dict:
+    return {
+        "application_id": customer.application_id,
+        "token": mask_token(customer.token),
+        "tag_id": customer.tag_id,
+        "trip_report_id": customer.trip_report_id,
+        "event_report_id": customer.event_report_id,
+    }
+
+
+def get_dashboard_customer(application_id: str | None = None) -> CustomerConfig:
+    if application_id:
+        customer = db.session.get(CustomerConfig, str(application_id))
+        if not customer:
+            raise RuntimeError(f"No customer_config row found for application_id={application_id}")
+        return customer
+
+    customers = load_customers()
+    if not customers:
+        raise RuntimeError("No customer_config rows found for dashboard/manual trigger")
+
+    customer = customers[0]
+    logger.warning(
+        f"Dashboard/manual trigger defaulted to application_id={customer.application_id} because no customer was specified"
+    )
+    return customer
+
+def process_event_with_dates(app, event_type, start_date, end_date, customer=None):
     """
     Helper function to process event data for a specific date range.
     Creates Flask request context with proper payload.
@@ -41,21 +77,24 @@ def process_event_with_dates(app, event_type, start_date, end_date):
     if event_type not in EVENT_CONFIG:
         raise ValueError(f"Unknown event type: {event_type}")
     
-    config = EVENT_CONFIG[event_type]
+    if customer is None:
+        customer = get_dashboard_customer()
+
+    runtime = get_event_runtime_config(customer, event_type, Config.BASE_URL)
     
     # Prepare payload matching process_event_data signature (MATCHES backfill_2025_week1.py)
     payload = {
-        "app_id": "6",
-        "token": Config.TOKEN,
-        "base_url": Config.BASE_URL,
-        "report_id": config['report_id'],
-        "tag_id": "39",  # Same as working backfill script
+        "app_id": runtime.app_id,
+        "token": runtime.token,
+        "base_url": runtime.base_url,
+        "report_id": runtime.report_id,
+        "tag_id": runtime.tag_id,
         "period_start": f"{start_date}T00:00:00Z",
         "period_end": f"{end_date}T23:59:59Z"
     }
     
-    if config['event_id']:
-        payload["event_id"] = config['event_id']
+    if runtime.event_id:
+        payload["event_id"] = runtime.event_id
     
     # Call process_event_data within Flask request context
     with app.test_request_context(
@@ -67,7 +106,7 @@ def process_event_with_dates(app, event_type, start_date, end_date):
         # process_event_data returns (jsonify(...), status_code) tuple
         response_tuple = process_event_data(
             event_name=event_type,
-            response_key=config['response_key']
+            response_key=runtime.response_key
         )
         
         # Extract the response object and JSON data
@@ -86,7 +125,7 @@ def process_event_with_dates(app, event_type, start_date, end_date):
 # MANUAL JOB EXECUTORS (Run in background threads)
 # ------------------------------------------------------------------
 
-def execute_dimension_sync_job(job_id):
+def execute_dimension_sync_job(job_id, application_id=None):
     """Execute dimension sync in background"""
     from application import create_app
     app = create_app()
@@ -98,14 +137,15 @@ def execute_dimension_sync_job(job_id):
             from sync_dimensions_from_api import main as sync_dimension_main
             
             logger.info(f"🚀 Starting dimension sync job {job_id}")
-            total_records = sync_dimension_main()  # Now returns record count
+            total_records = sync_dimension_main(application_id)  # Now returns record count
             
             job.status = 'completed'
             job.completed_at = datetime.utcnow()
             job.records_processed = total_records
             job.job_metadata = {
                 'message': f'Dimension sync completed - {total_records:,} records processed',
-                'total_records': total_records
+                'total_records': total_records,
+                'application_id': str(application_id) if application_id else None,
             }
             db.session.commit()
             
@@ -123,7 +163,7 @@ def execute_dimension_sync_job(job_id):
                 del active_jobs[job_id]
 
 
-def execute_fact_sync_job(job_id, start_date, end_date):
+def execute_fact_sync_job(job_id, start_date, end_date, application_id=None):
     """Execute fact table sync in background"""
     from application import create_app
     app = create_app()
@@ -134,7 +174,8 @@ def execute_fact_sync_job(job_id, start_date, end_date):
             logger.info(f"🚀 Starting fact sync job {job_id}: {start_date} to {end_date}")
             
             # Process all event types (server state issue resolved)
-            event_types = ['Trip', 'Speeding', 'Idle', 'AWH', 'WH', 'HA', 'HB', 'WU']
+            event_types = list(EVENT_CONFIG.keys())
+            customer = get_dashboard_customer(application_id)
             
             results = {}
             total_inserted = 0
@@ -147,7 +188,8 @@ def execute_fact_sync_job(job_id, start_date, end_date):
                         app=app,
                         event_type=event_type,
                         start_date=start_date,
-                        end_date=end_date
+                        end_date=end_date,
+                        customer=customer
                     )
                     results[event_type] = result
                     total_inserted += result.get('inserted', 0)
@@ -166,7 +208,8 @@ def execute_fact_sync_job(job_id, start_date, end_date):
                 'results': results, 
                 'start_date': start_date, 
                 'end_date': end_date,
-                'total_events_processed': len(event_types)
+                'total_events_processed': len(event_types),
+                'application_id': str(customer.application_id)
             }
             db.session.commit()
             
@@ -184,7 +227,7 @@ def execute_fact_sync_job(job_id, start_date, end_date):
                 del active_jobs[job_id]
 
 
-def execute_full_backfill_job(job_id, start_date, end_date):
+def execute_full_backfill_job(job_id, start_date, end_date, application_id=None):
     """Execute full backfill (dimensions + facts) in background"""
     from application import create_app
     app = create_app()
@@ -196,11 +239,12 @@ def execute_full_backfill_job(job_id, start_date, end_date):
             
             # Step 1: Sync dimensions
             from sync_dimensions_from_api import main as sync_dimension_main
-            sync_dimension_main()
+            sync_dimension_main(application_id)
             logger.info(f"✅ Dimensions synced from API")
             
             # Step 2: Sync facts
             event_types = ['Trip', 'Speeding', 'Idle', 'AWH', 'WH', 'HA', 'HB', 'WU']
+            customer = get_dashboard_customer(application_id)
             results = {}
             total_inserted = 0
             total_failed = 0
@@ -211,7 +255,8 @@ def execute_full_backfill_job(job_id, start_date, end_date):
                         app=app,
                         event_type=event_type,
                         start_date=start_date,
-                        end_date=end_date
+                        end_date=end_date,
+                        customer=customer
                     )
                     results[event_type] = result
                     total_inserted += result.get('inserted', 0)
@@ -228,7 +273,8 @@ def execute_full_backfill_job(job_id, start_date, end_date):
                 'dimensions': 'synced from GpsGate API',
                 'facts': results,
                 'start_date': start_date,
-                'end_date': end_date
+                'end_date': end_date,
+                'application_id': str(customer.application_id)
             }
             db.session.commit()
             
@@ -250,22 +296,98 @@ def execute_full_backfill_job(job_id, start_date, end_date):
 # API ENDPOINTS
 # ------------------------------------------------------------------
 
+@dashboard_bp.route('/customer-config', methods=['GET'])
+def list_customer_config():
+    """List current customer_config rows with masked tokens."""
+    try:
+        customers = (
+            db.session.query(CustomerConfig)
+            .order_by(CustomerConfig.application_id.asc())
+            .all()
+        )
+        return jsonify({
+            'success': True,
+            'customers': [serialize_customer_config(customer) for customer in customers]
+        })
+    except Exception as e:
+        logger.error(f"Failed to list customer_config: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@dashboard_bp.route('/customer-config', methods=['POST'])
+def save_customer_config():
+    """Create or update customer_config with application_id and token."""
+    try:
+        data = request.get_json() or {}
+        application_id = str(data.get('application_id', '')).strip()
+        token = str(data.get('token', '')).strip()
+
+        if not application_id or not token:
+            return jsonify({
+                'success': False,
+                'error': 'application_id and token are required'
+            }), 400
+
+        customer = db.session.get(CustomerConfig, application_id)
+        created = customer is None
+        if customer is None:
+            customer = CustomerConfig(application_id=application_id)
+            db.session.add(customer)
+
+        customer.token = token
+        customer.tag_id = None
+        customer.trip_report_id = None
+        customer.event_report_id = None
+        customer.awh_event_id = None
+        customer.ha_event_id = None
+        customer.hb_event_id = None
+        customer.hc_event_id = None
+        customer.wu_event_id = None
+        customer.wh_event_id = None
+        customer.speed_event_id = None
+        customer.idle_event_id = None
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': (
+                f"Customer config {'created' if created else 'updated'} for application_id={application_id}. "
+                "Run Dimension Sync to populate report, tag, and event IDs."
+            ),
+            'customer': serialize_customer_config(customer)
+        }), 201 if created else 200
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Failed to save customer_config: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @dashboard_bp.route('/trigger/dimension-sync', methods=['POST'])
 def trigger_dimension_sync():
     """Trigger manual dimension sync"""
     try:
+        data = request.get_json() or {}
+        application_id = str(data.get('application_id', '')).strip() or None
+
         # Create job execution record
         job = JobExecution(
             job_type='manual_dimension_sync',
             status='running',
             started_at=datetime.utcnow(),
-            triggered_by='manual'
+            triggered_by='manual',
+            job_metadata={'application_id': application_id}
         )
         db.session.add(job)
         db.session.commit()
         
         # Start background thread
-        thread = threading.Thread(target=execute_dimension_sync_job, args=(job.id,))
+        thread = threading.Thread(target=execute_dimension_sync_job, args=(job.id, application_id))
         thread.daemon = True
         thread.start()
         
@@ -274,7 +396,11 @@ def trigger_dimension_sync():
         return jsonify({
             'success': True,
             'job_id': job.id,
-            'message': 'Dimension sync started'
+            'message': (
+                f"Dimension sync started for application_id={application_id}"
+                if application_id else
+                'Dimension sync started'
+            )
         }), 202
         
     except Exception as e:
@@ -292,6 +418,7 @@ def trigger_fact_sync():
         data = request.get_json() or {}
         start_date = data.get('start_date')
         end_date = data.get('end_date')
+        application_id = str(data.get('application_id', '')).strip() or None
         
         if not start_date or not end_date:
             return jsonify({
@@ -309,7 +436,7 @@ def trigger_fact_sync():
             status='running',
             started_at=datetime.utcnow(),
             triggered_by='manual',
-            metadata={'start_date': start_date, 'end_date': end_date}
+            job_metadata={'start_date': start_date, 'end_date': end_date, 'application_id': application_id}
         )
         db.session.add(job)
         db.session.commit()
@@ -317,7 +444,7 @@ def trigger_fact_sync():
         # Start background thread
         thread = threading.Thread(
             target=execute_fact_sync_job,
-            args=(job.id, start_date, end_date)
+            args=(job.id, start_date, end_date, application_id)
         )
         thread.daemon = True
         thread.start()
@@ -327,7 +454,11 @@ def trigger_fact_sync():
         return jsonify({
             'success': True,
             'job_id': job.id,
-            'message': f'Fact sync started for {start_date} to {end_date}'
+            'message': (
+                f'Fact sync started for application_id={application_id} from {start_date} to {end_date}'
+                if application_id else
+                f'Fact sync started for {start_date} to {end_date}'
+            )
         }), 202
         
     except ValueError as e:
@@ -350,6 +481,7 @@ def trigger_full_backfill():
         data = request.get_json() or {}
         start_date = data.get('start_date')
         end_date = data.get('end_date')
+        application_id = str(data.get('application_id', '')).strip() or None
         
         if not start_date or not end_date:
             return jsonify({
@@ -367,7 +499,7 @@ def trigger_full_backfill():
             status='running',
             started_at=datetime.utcnow(),
             triggered_by='manual',
-            metadata={'start_date': start_date, 'end_date': end_date}
+            job_metadata={'start_date': start_date, 'end_date': end_date, 'application_id': application_id}
         )
         db.session.add(job)
         db.session.commit()
@@ -375,7 +507,7 @@ def trigger_full_backfill():
         # Start background thread
         thread = threading.Thread(
             target=execute_full_backfill_job,
-            args=(job.id, start_date, end_date)
+            args=(job.id, start_date, end_date, application_id)
         )
         thread.daemon = True
         thread.start()
@@ -385,7 +517,11 @@ def trigger_full_backfill():
         return jsonify({
             'success': True,
             'job_id': job.id,
-            'message': f'Full backfill started for {start_date} to {end_date}'
+            'message': (
+                f'Full backfill started for application_id={application_id} from {start_date} to {end_date}'
+                if application_id else
+                f'Full backfill started for {start_date} to {end_date}'
+            )
         }), 202
         
     except ValueError as e:
@@ -687,12 +823,21 @@ def dashboard_page():
             font-weight: 600;
         }
         
-        input[type="date"] {
+        input[type="date"],
+        input[type="text"],
+        select,
+        textarea {
             width: 100%;
             padding: 10px;
             border: 1px solid #ddd;
             border-radius: 6px;
             font-size: 14px;
+            font-family: inherit;
+        }
+
+        textarea {
+            min-height: 90px;
+            resize: vertical;
         }
         
         button {
@@ -857,6 +1002,32 @@ def dashboard_page():
                 </div>
                 
                 <div class="form-group">
+                    <label for="customer-app-id">Customer App ID</label>
+                    <input type="text" id="customer-app-id" placeholder="e.g. 93">
+                </div>
+                
+                <div class="form-group">
+                    <label for="customer-token">Customer Token</label>
+                    <textarea id="customer-token" placeholder="Paste GPSGate token"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <button onclick="saveCustomerConfig()">
+                        Save Customer Config
+                    </button>
+                </div>
+                
+                <div id="customer-config-list" class="job-list" style="max-height: 180px; margin-bottom: 15px;"></div>
+                <div id="customer-config-message" class="message"></div>
+                
+                <div class="form-group">
+                    <label for="manual-application-id">Run For Customer</label>
+                    <select id="manual-application-id">
+                        <option value="">Select customer</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
                     <label for="fact-start">Start Date</label>
                     <input type="date" id="fact-start" value="">
                 </div>
@@ -1010,13 +1181,102 @@ def dashboard_page():
                 msg.style.display = 'none';
             }, 5000);
         }
+
+        function showCustomerConfigMessage(type, text) {
+            const msg = document.getElementById('customer-config-message');
+            msg.className = 'message ' + type;
+            msg.textContent = text;
+            msg.style.display = 'block';
+            setTimeout(() => {
+                msg.style.display = 'none';
+            }, 5000);
+        }
+
+        function getSelectedApplicationId() {
+            return document.getElementById('manual-application-id').value.trim();
+        }
+
+        async function refreshCustomerConfigs() {
+            try {
+                const response = await fetch('/dashboard/customer-config');
+                const data = await response.json();
+                const list = document.getElementById('customer-config-list');
+                const select = document.getElementById('manual-application-id');
+                const currentSelection = select.value;
+                if (!data.success) {
+                    list.innerHTML = '<em style="color: #666;">Failed to load customer config</em>';
+                    return;
+                }
+                if (!data.customers.length) {
+                    list.innerHTML = '<em style="color: #666;">No customer_config rows yet</em>';
+                    select.innerHTML = '<option value="">Select customer</option>';
+                    return;
+                }
+                select.innerHTML = '<option value="">Select customer</option>' + data.customers.map(customer => `
+                    <option value="${customer.application_id}">App ${customer.application_id}</option>
+                `).join('');
+                if (currentSelection && data.customers.some(customer => customer.application_id === currentSelection)) {
+                    select.value = currentSelection;
+                } else {
+                    select.value = data.customers[0].application_id;
+                }
+                list.innerHTML = data.customers.map(customer => `
+                    <div class="job-item" style="padding: 10px; margin-bottom: 8px;">
+                        <div class="job-header">
+                            <span class="job-type">App ${customer.application_id}</span>
+                        </div>
+                        <div class="job-details">
+                            Token: ${customer.token}<br>
+                            Trip Report: ${customer.trip_report_id || '-'}<br>
+                            Event Report: ${customer.event_report_id || '-'}<br>
+                            Tag: ${customer.tag_id || '-'}
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Failed to refresh customer config:', error);
+            }
+        }
+
+        async function saveCustomerConfig() {
+            const applicationId = document.getElementById('customer-app-id').value.trim();
+            const token = document.getElementById('customer-token').value.trim();
+
+            if (!applicationId || !token) {
+                showCustomerConfigMessage('error', 'Please enter both application ID and token');
+                return;
+            }
+
+            try {
+                const response = await fetch('/dashboard/customer-config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({application_id: applicationId, token})
+                });
+                const data = await response.json();
+                showCustomerConfigMessage(data.success ? 'success' : 'error', data.message || data.error);
+                if (data.success) {
+                    document.getElementById('customer-app-id').value = '';
+                    document.getElementById('customer-token').value = '';
+                    refreshCustomerConfigs();
+                }
+            } catch (error) {
+                showCustomerConfigMessage('error', 'Request failed: ' + error.message);
+            }
+        }
         
         // Trigger functions
         async function triggerDimensionSync() {
+            const applicationId = getSelectedApplicationId();
+            if (!applicationId) {
+                showMessage('error', 'Please select a customer');
+                return;
+            }
             try {
                 const response = await fetch('/dashboard/trigger/dimension-sync', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'}
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({application_id: applicationId})
                 });
                 const data = await response.json();
                 showMessage(data.success ? 'success' : 'error', data.message || data.error);
@@ -1029,8 +1289,14 @@ def dashboard_page():
         }
         
         async function triggerFactSync() {
+            const applicationId = getSelectedApplicationId();
             const startDate = document.getElementById('fact-start').value;
             const endDate = document.getElementById('fact-end').value;
+            
+            if (!applicationId) {
+                showMessage('error', 'Please select a customer');
+                return;
+            }
             
             if (!startDate || !endDate) {
                 showMessage('error', 'Please select start and end dates');
@@ -1041,7 +1307,11 @@ def dashboard_page():
                 const response = await fetch('/dashboard/trigger/fact-sync', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({start_date: startDate, end_date: endDate})
+                    body: JSON.stringify({
+                        application_id: applicationId,
+                        start_date: startDate,
+                        end_date: endDate
+                    })
                 });
                 const data = await response.json();
                 showMessage(data.success ? 'success' : 'error', data.message || data.error);
@@ -1054,8 +1324,14 @@ def dashboard_page():
         }
         
         async function triggerFullBackfill() {
+            const applicationId = getSelectedApplicationId();
             const startDate = document.getElementById('fact-start').value;
             const endDate = document.getElementById('fact-end').value;
+            
+            if (!applicationId) {
+                showMessage('error', 'Please select a customer');
+                return;
+            }
             
             if (!startDate || !endDate) {
                 showMessage('error', 'Please select start and end dates');
@@ -1066,7 +1342,11 @@ def dashboard_page():
                 const response = await fetch('/dashboard/trigger/full-backfill', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({start_date: startDate, end_date: endDate})
+                    body: JSON.stringify({
+                        application_id: applicationId,
+                        start_date: startDate,
+                        end_date: endDate
+                    })
                 });
                 const data = await response.json();
                 showMessage(data.success ? 'success' : 'error', data.message || data.error);
@@ -1205,6 +1485,7 @@ def dashboard_page():
 
         // Initialize dashboard
         refreshJobs();
+        refreshCustomerConfigs();
         refreshLastSync();
         refreshSchedulerStatus();
         
@@ -1222,16 +1503,20 @@ def dashboard_page():
 def check_gpsgate_server_health():
     """Quick health check for GpsGate server state"""
     try:
-        # Test with a simple WU event request (known to work recently)
+        customers = load_customers()
+        if not customers:
+            return jsonify({'status': 'degraded', 'message': 'No customer_config rows found'}), 503
+
+        runtime = get_event_runtime_config(customers[0], "WU", Config.BASE_URL)
         test_payload = {
-            "app_id": "6",
-            "token": Config.TOKEN,
-            "base_url": Config.BASE_URL,
-            "report_id": "25",
+            "app_id": runtime.app_id,
+            "token": runtime.token,
+            "base_url": runtime.base_url,
+            "report_id": runtime.report_id,
             "period_start": "2025-01-01T00:00:00Z", 
             "period_end": "2025-01-01T23:59:59Z",
-            "tag_id": "39",  # Use working configuration
-            "event_id": "17"  # WU event with correct ID
+            "tag_id": runtime.tag_id,
+            "event_id": runtime.event_id
         }
         
         response = requests.post(

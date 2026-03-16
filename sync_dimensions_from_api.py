@@ -1,337 +1,269 @@
-# #!/usr/bin/env python
-# """
-# Sync dimension tables from GpsGate API
-# (Replaces Power BI M Queries)
-
-# Targets:
-# - dim_tags
-# - dim_event_rules
-# - dim_reports
-# - dim_vehicles
-# - dim_drivers
-# - dim_vehicle_custom_fields
-# """
-
-# import os
-# import requests
-# import psycopg
-# from urllib.parse import urljoin
-# from dotenv import load_dotenv
-
-# # ------------------------------------------------------------------
-# # ENV / CONFIG
-# # ------------------------------------------------------------------
-# load_dotenv()
-
-# DATABASE_URL = os.getenv("DATABASE_URL")
-# if not DATABASE_URL:
-#     raise RuntimeError("❌ DATABASE_URL not set in environment")
-
-# BASE_URL = "https://omantracking2.com"
-# APP_ID = 6
-# AUTH_TOKEN = "v2:MDAwMDAyODkwMDozOWM1MzQ1YWU2N2I4YWQ3MThhZA=="
-
-# # ------------------------------------------------------------------
-# # API HELPER (LOCAL VERSION OF call_api)
-# # ------------------------------------------------------------------
-# def call_api(
-#     *,
-#     method="GET",
-#     base_url: str,
-#     path: str,
-#     token: str,
-#     params: dict | None = None,
-#     json_payload: dict | None = None,
-#     data_payload: dict | None = None,
-#     timeout: int = 30,
-# ):
-#     if not base_url or not path:
-#         raise ValueError("base_url and path are required")
-
-#     headers = {"Authorization": token}
-#     url = urljoin(base_url if base_url.endswith("/") else base_url + "/", path.lstrip("/"))
-
-#     resp = requests.request(
-#         method=method,
-#         url=url,
-#         params=params,
-#         json=json_payload,
-#         data=data_payload,
-#         headers=headers,
-#         timeout=timeout,
-#     )
-
-#     resp.raise_for_status()
-
-#     if "application/json" in resp.headers.get("Content-Type", "").lower():
-#         return resp.json()
-#     return resp.text
-
-
-# def api_get(path: str):
-#     """
-#     Wrapper matching Power BI M-query behavior:
-#     returns Response[data]
-#     """
-#     response = call_api(
-#         method="GET",
-#         base_url=BASE_URL,
-#         path=path,
-#         token=AUTH_TOKEN,
-#     )
-
-#     if isinstance(response, dict) and "data" in response:
-#         return response["data"]
-
-#     # some endpoints return list directly
-#     return response
-
-
-# # ------------------------------------------------------------------
-# # SYNC FUNCTIONS
-# # ------------------------------------------------------------------
-# def sync_tags(cur):
-#     rows = api_get(f"comGpsGate/api/v.1/applications/{APP_ID}/tags")
-#     for r in rows:
-#         cur.execute(
-#             """
-#             INSERT INTO dim_tags (id, application_id, name)
-#             VALUES (%s, %s, %s)
-#             ON CONFLICT (id) DO UPDATE
-#             SET name = EXCLUDED.name
-#             """,
-#             (int(r["id"]), APP_ID, r["name"]),
-#         )
-
-
-# def sync_event_rules(cur):
-#     rows = api_get(f"comGpsGate/api/v.1/applications/{APP_ID}/eventrules")
-#     for r in rows:
-#         cur.execute(
-#             """
-#             INSERT INTO dim_event_rules (id, application_id, name)
-#             VALUES (%s, %s, %s)
-#             ON CONFLICT (id) DO UPDATE
-#             SET name = EXCLUDED.name
-#             """,
-#             (int(r["id"]), APP_ID, r["name"]),
-#         )
-
-
-# def sync_reports(cur):
-#     rows = api_get(f"comGpsGate/api/v.1/applications/{APP_ID}/reports")
-#     for r in rows:
-#         cur.execute(
-#             """
-#             INSERT INTO dim_reports (id, application_id, name)
-#             VALUES (%s, %s, %s)
-#             ON CONFLICT (id) DO UPDATE
-#             SET name = EXCLUDED.name
-#             """,
-#             (int(r["id"]), APP_ID, r["name"]),
-#         )
-
-
-# def sync_vehicles(cur):
-#     users = api_get(f"comGpsGate/api/v.1/applications/{APP_ID}/users")
-
-#     for u in users:
-#         tp = u.get("trackPoint") or {}
-#         pos = tp.get("position") or {}
-
-#         for d in u.get("devices", []):
-#             cur.execute(
-#                 """
-#                 INSERT INTO dim_vehicles (
-#                     id, application_id, name, username, imei,
-#                     latitude, longitude, last_utc, valid, device_name
-#                 )
-#                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-#                 ON CONFLICT (id) DO UPDATE SET
-#                     imei = EXCLUDED.imei,
-#                     latitude = EXCLUDED.latitude,
-#                     longitude = EXCLUDED.longitude,
-#                     last_utc = EXCLUDED.last_utc,
-#                     valid = EXCLUDED.valid,
-#                     device_name = EXCLUDED.device_name
-#                 """,
-#                 (
-#                     int(u["id"]),
-#                     APP_ID,
-#                     u.get("name"),
-#                     u.get("username"),
-#                     d.get("imei"),
-#                     pos.get("latitude"),
-#                     pos.get("longitude"),
-#                     tp.get("utc"),
-#                     tp.get("valid"),
-#                     d.get("name"),
-#                 ),
-#             )
-
-
-# def sync_drivers(cur):
-#     users = api_get(f"comGpsGate/api/v.1/applications/{APP_ID}/users")
-
-#     for u in users:
-#         if u.get("driverID"):
-#             cur.execute(
-#                 """
-#                 INSERT INTO dim_drivers (id, application_id, name, username, driver_id)
-#                 VALUES (%s,%s,%s,%s,%s)
-#                 ON CONFLICT (id) DO UPDATE SET
-#                     name = EXCLUDED.name,
-#                     driver_id = EXCLUDED.driver_id
-#                 """,
-#                 (
-#                     int(u["id"]),
-#                     APP_ID,
-#                     u.get("name"),
-#                     u.get("username"),
-#                     u.get("driverID"),
-#                 ),
-#             )
-
-
-# def sync_vehicle_custom_fields(cur):
-#     vehicles = call_api(
-#         method="GET",
-#         base_url=BASE_URL,
-#         path=f"comGpsGate/api/v.1/applications/{APP_ID}/users",
-#         token=AUTH_TOKEN
-#     )
-
-#     for v in vehicles:
-#         vid = v.get("id")
-#         if not vid:
-#             continue
-
-#         try:
-#             fields = call_api(
-#                 method="GET",
-#                 base_url=BASE_URL,
-#                 path=f"comGpsGate/api/v.1/applications/{APP_ID}/users/{vid}/customfields",
-#                 token=AUTH_TOKEN,
-#                 timeout=60
-#             )
-#         except Exception as e:
-#             print(f"⚠️ Skipping custom fields for vehicle {vid}: {e}")
-#             continue
-
-#         if not isinstance(fields, list):
-#             continue
-
-#         for f in fields:
-#             cur.execute(
-#                 """
-#                 INSERT INTO dim_vehicle_custom_fields
-#                     (vehicle_id, field_name, field_value)
-#                 VALUES (%s, %s, %s)
-#                 ON CONFLICT (vehicle_id, field_name)
-#                 DO UPDATE SET field_value = EXCLUDED.field_value
-#                 """,
-#                 (
-#                     int(vid),
-#                     f.get("name"),
-#                     str(f.get("value")) if f.get("value") is not None else None
-#                 )
-#             )
-
-
-
-# # ------------------------------------------------------------------
-# # MAIN
-# # ------------------------------------------------------------------
-# def main():
-#     print("🚀 Starting dimension sync…")
-
-#     db_url = DATABASE_URL.replace("postgresql+psycopg://", "postgresql://")
-
-#     with psycopg.connect(db_url) as conn:
-#         with conn.cursor() as cur:
-#             sync_tags(cur)
-#             sync_event_rules(cur)
-#             sync_reports(cur)
-#             sync_vehicles(cur)
-#             sync_drivers(cur)
-#             sync_vehicle_custom_fields(cur)
-
-#         conn.commit()
-
-#     print("✅ Dimension sync completed successfully")
-
-
-# if __name__ == "__main__":
-#     main()
-
-
 #!/usr/bin/env python
-"""
-Sync dimension tables from GpsGate API → PostgreSQL
+"""Sync dimension tables from GpsGate API and refresh customer_config IDs."""
 
-Replaces Power BI M Queries:
-- Tags
-- Event Rules
-- Reports
-- Vehicles
-- Drivers (ENRICHED)
-- Vehicle Custom Fields (fnUserCustomFields_Direct)
+from __future__ import annotations
 
-Features:
-- Fast batch inserts
-- Progress logs
-- Retry-safe API calls
-- Commits after each sync
-- Uses DATABASE_URL from env
-"""
-
+import argparse
 import os
+import re
 import time
-import requests
-import psycopg
 from datetime import datetime
 from urllib.parse import urljoin
+
+import psycopg
+import requests
 from dotenv import load_dotenv
 
-# ------------------------------------------------------------------
-# ENV
-# ------------------------------------------------------------------
+
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 BASE_URL = os.getenv("BASE_URL", "https://omantracking2.com")
-APP_ID = 6
-AUTH_TOKEN = os.getenv("TOKEN")
 
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL missing")
 
-# psycopg3 requires standard postgres URL
 if DATABASE_URL.startswith("postgresql+psycopg://"):
-    DATABASE_URL = DATABASE_URL.replace(
-        "postgresql+psycopg://", "postgresql://"
-    )
+    DATABASE_URL = DATABASE_URL.replace("postgresql+psycopg://", "postgresql://")
 
-# ------------------------------------------------------------------
-# LOGGING
-# ------------------------------------------------------------------
-def log(msg, level="INFO"):
+
+TAG_NAME = "Show on Map"
+NORMALIZED_NAME_SQL = "regexp_replace(lower(trim(name)), '^[^a-z0-9]+|[^a-z0-9]+$', '', 'g')"
+
+REPORT_MAP = {
+    "trip_report_id": ["Trip and Idle (Tag)-BI Format"],
+    "event_report_id": ["Event Rule detailed (Tag)", "Event Rule detailed (User)"],
+}
+
+EVENT_RULE_MAP = {
+    "Over Speeding +150km/h": "speed_event_id",
+    "30 min idle": "idle_event_id",
+    "After Working Hours Usage": "awh_event_id",
+    "Harsh Acceleration": "ha_event_id",
+    "Harsh Braking": "hb_event_id",
+    "Harsh Cornering": "hc_event_id",
+    "Weekend Usage": "wu_event_id",
+    "Working Hours Usage": "wh_event_id",
+}
+
+
+def log(msg: str, level: str = "INFO") -> None:
     ts = datetime.now().strftime("%H:%M:%S")
     print(f"[{ts}] [{level}] {msg}", flush=True)
 
-# ------------------------------------------------------------------
-# API CALL (DIRECT)
-# ------------------------------------------------------------------
+
+def normalize_lookup_name(value: str | None) -> str:
+    value = (value or "").strip().lower()
+    return re.sub(r"^[^a-z0-9]+|[^a-z0-9]+$", "", value)
+
+
+def normalize_token(token: str | None) -> str:
+    token = (token or "").strip()
+    if not token:
+        raise RuntimeError("Missing token")
+    if token.lower().startswith("bearer "):
+        return token
+    if token.startswith("v1:") or token.startswith("v2:"):
+        return token
+    return f"v2:{token}"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Sync dimensions using customer_config")
+    parser.add_argument(
+        "--application-id",
+        help="Optional application_id to sync from customer_config",
+    )
+    return parser.parse_args()
+
+
+def load_customer_configs(cur, only_application_id: str | None = None) -> list[dict]:
+    if only_application_id:
+        cur.execute(
+            """
+            select application_id::text, token
+            from customer_config
+            where application_id = %s
+            order by application_id
+            """,
+            (str(only_application_id),),
+        )
+    else:
+        cur.execute(
+            """
+            select application_id::text, token
+            from customer_config
+            order by application_id
+            """
+        )
+
+    rows = cur.fetchall()
+    configs = [
+        {
+            "application_id": int(application_id),
+            "token": normalize_token(token),
+        }
+        for application_id, token in rows
+    ]
+
+    if configs:
+        return configs
+
+    if only_application_id:
+        raise RuntimeError(f"No customer_config row found for application_id={only_application_id}")
+
+    raise RuntimeError("No customer_config rows found")
+
+
+def lookup_tag_id(cur, application_id: int) -> str | None:
+    cur.execute(
+        f"""
+        select id::text
+        from dim_tags
+        where application_id = %s
+          and {NORMALIZED_NAME_SQL} = %s
+        order by id
+        limit 1
+        """,
+        (application_id, normalize_lookup_name(TAG_NAME)),
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+def lookup_named_ids(
+    cur,
+    *,
+    table_name: str,
+    application_id: int,
+    names_to_columns: dict[str, str],
+) -> dict[str, str]:
+    normalized_names = {
+        normalize_lookup_name(name): column_name
+        for name, column_name in names_to_columns.items()
+    }
+    cur.execute(
+        f"""
+        select id::text, {NORMALIZED_NAME_SQL} as normalized_name
+        from {table_name}
+        where application_id = %s
+          and {NORMALIZED_NAME_SQL} = any(%s)
+        order by normalized_name, id
+        """,
+        (application_id, list(normalized_names.keys())),
+    )
+
+    values: dict[str, str] = {}
+    for record_id, normalized_name in cur.fetchall():
+        column_name = normalized_names[normalized_name]
+        values.setdefault(column_name, record_id)
+    return values
+
+
+def lookup_report_ids(cur, application_id: int) -> dict[str, str]:
+    normalized_candidates = {
+        column_name: [normalize_lookup_name(name) for name in candidate_names]
+        for column_name, candidate_names in REPORT_MAP.items()
+    }
+    all_candidates = [
+        candidate
+        for candidate_names in normalized_candidates.values()
+        for candidate in candidate_names
+    ]
+
+    cur.execute(
+        f"""
+        select id::text, {NORMALIZED_NAME_SQL} as normalized_name
+        from dim_reports
+        where application_id = %s
+          and {NORMALIZED_NAME_SQL} = any(%s)
+        order by normalized_name, id
+        """,
+        (application_id, all_candidates),
+    )
+
+    available_by_name: dict[str, str] = {}
+    for record_id, normalized_name in cur.fetchall():
+        available_by_name.setdefault(normalized_name, record_id)
+
+    result: dict[str, str] = {}
+    for column_name, candidate_names in normalized_candidates.items():
+        for candidate_name in candidate_names:
+            if candidate_name in available_by_name:
+                result[column_name] = available_by_name[candidate_name]
+                break
+    return result
+
+
+def update_customer_config_from_dims(cur, application_id: int) -> None:
+    customer_config_application_id = str(application_id)
+    report_ids = lookup_report_ids(cur, application_id)
+    event_rule_ids = lookup_named_ids(
+        cur,
+        table_name="dim_event_rules",
+        application_id=application_id,
+        names_to_columns=EVENT_RULE_MAP,
+    )
+
+    payload = {
+        "application_id": customer_config_application_id,
+        "tag_id": lookup_tag_id(cur, application_id),
+        "trip_report_id": report_ids.get("trip_report_id"),
+        "event_report_id": report_ids.get("event_report_id"),
+        "speed_event_id": event_rule_ids.get("speed_event_id"),
+        "idle_event_id": event_rule_ids.get("idle_event_id"),
+        "awh_event_id": event_rule_ids.get("awh_event_id"),
+        "ha_event_id": event_rule_ids.get("ha_event_id"),
+        "hb_event_id": event_rule_ids.get("hb_event_id"),
+        "hc_event_id": event_rule_ids.get("hc_event_id"),
+        "wu_event_id": event_rule_ids.get("wu_event_id"),
+        "wh_event_id": event_rule_ids.get("wh_event_id"),
+    }
+
+    cur.execute(
+        """
+        update customer_config
+        set tag_id = %(tag_id)s,
+            trip_report_id = %(trip_report_id)s,
+            event_report_id = %(event_report_id)s,
+            speed_event_id = %(speed_event_id)s,
+            idle_event_id = %(idle_event_id)s,
+            awh_event_id = %(awh_event_id)s,
+            ha_event_id = %(ha_event_id)s,
+            hb_event_id = %(hb_event_id)s,
+            hc_event_id = %(hc_event_id)s,
+            wu_event_id = %(wu_event_id)s,
+            wh_event_id = %(wh_event_id)s
+        where application_id = %(application_id)s
+        """,
+        payload,
+    )
+
+    missing = [
+        column_name
+        for column_name, value in payload.items()
+        if column_name != "application_id" and value is None
+    ]
+    if missing:
+        log(
+            f"customer_config updated for app {application_id} with missing mappings: {', '.join(sorted(missing))}",
+            "WARN",
+        )
+    else:
+        log(f"customer_config updated for app {application_id}")
+
+
 def call_api(
-    method="GET",
-    base_url=None,
-    path=None,
-    params=None,
-    json=None,
-    data=None,
-    token=None,
-    timeout=30,
-    retries=3,
+    *,
+    method: str = "GET",
+    base_url: str,
+    path: str,
+    token: str,
+    params: dict | None = None,
+    json_payload: dict | None = None,
+    data_payload: dict | None = None,
+    timeout: int = 30,
+    retries: int = 3,
 ):
     base = base_url if base_url.endswith("/") else base_url + "/"
     url = urljoin(base, path.lstrip("/"))
@@ -343,8 +275,8 @@ def call_api(
                 method=method,
                 url=url,
                 params=params,
-                json=json,
-                data=data,
+                json=json_payload,
+                data=data_payload,
                 headers=headers,
                 timeout=timeout,
             )
@@ -354,156 +286,152 @@ def call_api(
         except Exception:
             if attempt == retries:
                 raise
-            log(f"Retry {attempt}/{retries} → {path}", "WARN")
+            log(f"Retry {attempt}/{retries} -> {path}", "WARN")
             time.sleep(2)
 
-# ------------------------------------------------------------------
-# SYNC FUNCTIONS
-# ------------------------------------------------------------------
-def sync_tags(cur):
-    log("Syncing dim_tags")
+
+def sync_tags(cur, application_id: int, auth_token: str) -> int:
+    log(f"Syncing dim_tags for app {application_id}")
     data = call_api(
         base_url=BASE_URL,
-        path=f"comGpsGate/api/v.1/applications/{APP_ID}/tags",
-        token=AUTH_TOKEN,
+        path=f"comGpsGate/api/v.1/applications/{application_id}/tags",
+        token=auth_token,
     )
 
-    rows = [(int(r["id"]), APP_ID, r["name"]) for r in data]
-
+    rows = [(int(r["id"]), application_id, r["name"]) for r in data]
     cur.executemany(
         """
-        INSERT INTO dim_tags (id, application_id, name)
-        VALUES (%s,%s,%s)
-        ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+        insert into dim_tags (id, application_id, name)
+        values (%s,%s,%s)
+        on conflict (application_id, id) do update
+        set name = excluded.name
         """,
         rows,
     )
-    log(f"dim_tags ✓ {len(rows)}")
+    log(f"dim_tags ok {len(rows)} for app {application_id}")
     return len(rows)
 
 
-def sync_event_rules(cur):
-    log("Syncing dim_event_rules")
+def sync_event_rules(cur, application_id: int, auth_token: str) -> int:
+    log(f"Syncing dim_event_rules for app {application_id}")
     data = call_api(
         base_url=BASE_URL,
-        path=f"comGpsGate/api/v.1/applications/{APP_ID}/eventrules",
-        token=AUTH_TOKEN,
+        path=f"comGpsGate/api/v.1/applications/{application_id}/eventrules",
+        token=auth_token,
     )
 
-    rows = [(int(r["id"]), APP_ID, r["name"]) for r in data]
-
+    rows = [(int(r["id"]), application_id, r["name"]) for r in data]
     cur.executemany(
         """
-        INSERT INTO dim_event_rules (id, application_id, name)
-        VALUES (%s,%s,%s)
-        ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+        insert into dim_event_rules (id, application_id, name)
+        values (%s,%s,%s)
+        on conflict (application_id, id) do update
+        set name = excluded.name
         """,
         rows,
     )
-    log(f"dim_event_rules ✓ {len(rows)}")
+    log(f"dim_event_rules ok {len(rows)} for app {application_id}")
     return len(rows)
 
 
-def sync_reports(cur):
-    log("Syncing dim_reports")
+def sync_reports(cur, application_id: int, auth_token: str) -> int:
+    log(f"Syncing dim_reports for app {application_id}")
     data = call_api(
         base_url=BASE_URL,
-        path=f"comGpsGate/api/v.1/applications/{APP_ID}/reports",
-        token=AUTH_TOKEN,
+        path=f"comGpsGate/api/v.1/applications/{application_id}/reports",
+        token=auth_token,
     )
 
-    rows = [(int(r["id"]), APP_ID, r["name"]) for r in data]
-
+    rows = [(int(r["id"]), application_id, r["name"]) for r in data]
     cur.executemany(
         """
-        INSERT INTO dim_reports (id, application_id, name)
-        VALUES (%s,%s,%s)
-        ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+        insert into dim_reports (id, application_id, name)
+        values (%s,%s,%s)
+        on conflict (application_id, id) do update
+        set name = excluded.name
         """,
         rows,
     )
-    log(f"dim_reports ✓ {len(rows)}")
+    log(f"dim_reports ok {len(rows)} for app {application_id}")
     return len(rows)
 
 
-def sync_vehicles_and_drivers(cur):
-    log("Syncing dim_vehicles + dim_drivers (ENRICHED)")
-
+def sync_vehicles_and_drivers(cur, application_id: int, auth_token: str) -> int:
+    log(f"Syncing dim_vehicles + dim_drivers for app {application_id}")
     users = call_api(
         base_url=BASE_URL,
-        path=f"comGpsGate/api/v.1/applications/{APP_ID}/users",
-        token=AUTH_TOKEN,
+        path=f"comGpsGate/api/v.1/applications/{application_id}/users",
+        token=auth_token,
         timeout=60,
     )
 
     vehicle_rows = []
     driver_rows = []
 
-    for idx, u in enumerate(users, start=1):
+    for idx, user in enumerate(users, start=1):
         if idx % 50 == 0:
-            log(f"Users processed: {idx}/{len(users)}")
+            log(f"Users processed for app {application_id}: {idx}/{len(users)}")
 
-        tp = u.get("trackPoint") or {}
-        pos = tp.get("position") or {}
-        devices = u.get("devices") or []
+        track_point = user.get("trackPoint") or {}
+        position = track_point.get("position") or {}
+        devices = user.get("devices") or []
 
         device_name = None
         imei = None
-
         if devices:
             device_name = devices[0].get("name")
             imei = devices[0].get("imei")
 
-        # Vehicles
         if imei:
             vehicle_rows.append(
                 (
-                    int(u["id"]),
-                    APP_ID,
-                    u.get("name"),
-                    u.get("username"),
+                    int(user["id"]),
+                    application_id,
+                    user.get("name"),
+                    user.get("username"),
                     imei,
-                    pos.get("latitude"),
-                    pos.get("longitude"),
-                    tp.get("utc"),
-                    tp.get("valid"),
+                    position.get("latitude"),
+                    position.get("longitude"),
+                    track_point.get("utc"),
+                    track_point.get("valid"),
                     device_name,
                 )
             )
 
-        # Drivers (flattened like Power BI)
-        if u.get("driverID"):
+        if user.get("driverID"):
             driver_rows.append(
                 (
-                    int(u["id"]),
-                    APP_ID,
-                    u.get("name"),
-                    u.get("username"),
-                    u.get("driverID"),
+                    int(user["id"]),
+                    application_id,
+                    user.get("name"),
+                    user.get("username"),
+                    user.get("driverID"),
                     device_name,
                     imei,
-                    pos.get("latitude"),
-                    pos.get("longitude"),
-                    tp.get("utc"),
-                    tp.get("valid"),
+                    position.get("latitude"),
+                    position.get("longitude"),
+                    track_point.get("utc"),
+                    track_point.get("valid"),
                 )
             )
 
     if vehicle_rows:
         cur.executemany(
             """
-            INSERT INTO dim_vehicles (
+            insert into dim_vehicles (
                 id, application_id, name, username, imei,
                 latitude, longitude, last_utc, valid, device_name
             )
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT (id) DO UPDATE SET
-                imei = EXCLUDED.imei,
-                latitude = EXCLUDED.latitude,
-                longitude = EXCLUDED.longitude,
-                last_utc = EXCLUDED.last_utc,
-                valid = EXCLUDED.valid,
-                device_name = EXCLUDED.device_name
+            values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            on conflict (application_id, id) do update set
+                imei = excluded.imei,
+                name = excluded.name,
+                username = excluded.username,
+                latitude = excluded.latitude,
+                longitude = excluded.longitude,
+                last_utc = excluded.last_utc,
+                valid = excluded.valid,
+                device_name = excluded.device_name
             """,
             vehicle_rows,
         )
@@ -511,38 +439,36 @@ def sync_vehicles_and_drivers(cur):
     if driver_rows:
         cur.executemany(
             """
-            INSERT INTO dim_drivers (
+            insert into dim_drivers (
                 id, application_id, name, username, driver_id,
-                device_name, imei,
-                latitude, longitude, utc, validity
+                device_name, imei, latitude, longitude, utc, validity
             )
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT (id) DO UPDATE SET
-                name = EXCLUDED.name,
-                username = EXCLUDED.username,
-                driver_id = EXCLUDED.driver_id,
-                device_name = EXCLUDED.device_name,
-                imei = EXCLUDED.imei,
-                latitude = EXCLUDED.latitude,
-                longitude = EXCLUDED.longitude,
-                utc = EXCLUDED.utc,
-                validity = EXCLUDED.validity
+            values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            on conflict (application_id, id) do update set
+                name = excluded.name,
+                username = excluded.username,
+                driver_id = excluded.driver_id,
+                device_name = excluded.device_name,
+                imei = excluded.imei,
+                latitude = excluded.latitude,
+                longitude = excluded.longitude,
+                utc = excluded.utc,
+                validity = excluded.validity
             """,
             driver_rows,
         )
 
-    log(f"dim_vehicles ✓ {len(vehicle_rows)}")
-    log(f"dim_drivers ✓ {len(driver_rows)}")
+    log(f"dim_vehicles ok {len(vehicle_rows)} for app {application_id}")
+    log(f"dim_drivers ok {len(driver_rows)} for app {application_id}")
     return len(vehicle_rows) + len(driver_rows)
 
 
-def sync_vehicle_custom_fields(cur):
-    log("Syncing dim_vehicle_custom_fields")
-
+def sync_vehicle_custom_fields(cur, application_id: int, auth_token: str) -> int:
+    log(f"Syncing dim_vehicle_custom_fields for app {application_id}")
     users = call_api(
         base_url=BASE_URL,
-        path=f"comGpsGate/api/v.1/applications/{APP_ID}/users",
-        token=AUTH_TOKEN,
+        path=f"comGpsGate/api/v.1/applications/{application_id}/users",
+        token=auth_token,
         timeout=60,
     )
 
@@ -550,37 +476,44 @@ def sync_vehicle_custom_fields(cur):
     skipped = 0
     total_processed = 0
 
-    for idx, u in enumerate(users, start=1):
-        vid = u.get("id")
-        if not vid:
+    for idx, user in enumerate(users, start=1):
+        user_id = user.get("id")
+        if not user_id:
             continue
 
         if idx % 25 == 0:
-            log(f"Custom fields progress: {idx}/{len(users)}")
+            log(f"Custom fields progress for app {application_id}: {idx}/{len(users)}")
 
         try:
             fields = call_api(
                 base_url=BASE_URL,
-                path=f"comGpsGate/api/v.1/applications/{APP_ID}/users/{vid}/customfields",
-                token=AUTH_TOKEN,
+                path=f"comGpsGate/api/v.1/applications/{application_id}/users/{user_id}/customfields",
+                token=auth_token,
                 timeout=30,
             )
         except Exception:
             skipped += 1
             continue
 
-        for f in fields:
-            rows.append((int(vid), f.get("name"), str(f.get("value"))))
+        for field in fields:
+            rows.append(
+                (
+                    application_id,
+                    int(user_id),
+                    field.get("name"),
+                    str(field.get("value")),
+                )
+            )
             total_processed += 1
 
         if len(rows) >= 500:
             cur.executemany(
                 """
-                INSERT INTO dim_vehicle_custom_fields
-                    (vehicle_id, field_name, field_value)
-                VALUES (%s,%s,%s)
-                ON CONFLICT (vehicle_id, field_name)
-                DO UPDATE SET field_value = EXCLUDED.field_value
+                insert into dim_vehicle_custom_fields
+                    (application_id, vehicle_id, field_name, field_value)
+                values (%s,%s,%s,%s)
+                on conflict (application_id, vehicle_id, field_name)
+                do update set field_value = excluded.field_value
                 """,
                 rows,
             )
@@ -589,45 +522,61 @@ def sync_vehicle_custom_fields(cur):
     if rows:
         cur.executemany(
             """
-            INSERT INTO dim_vehicle_custom_fields
-                (vehicle_id, field_name, field_value)
-            VALUES (%s,%s,%s)
-            ON CONFLICT (vehicle_id, field_name)
-            DO UPDATE SET field_value = EXCLUDED.field_value
+            insert into dim_vehicle_custom_fields
+                (application_id, vehicle_id, field_name, field_value)
+            values (%s,%s,%s,%s)
+            on conflict (application_id, vehicle_id, field_name)
+            do update set field_value = excluded.field_value
             """,
             rows,
         )
 
-    log(f"dim_vehicle_custom_fields ✓ | skipped {skipped}")
+    log(f"dim_vehicle_custom_fields ok {total_processed} for app {application_id} | skipped {skipped}")
     return total_processed
 
-# ------------------------------------------------------------------
-# MAIN
-# ------------------------------------------------------------------
-def main():
-    log("🚀 Starting dimension sync")
+
+def main(only_application_id: str | int | None = None) -> int:
+    log("Starting dimension sync")
     start = time.time()
     total_records = 0
+    args = None if only_application_id is not None else parse_args()
+    selected_application_id = (
+        str(only_application_id)
+        if only_application_id is not None
+        else args.application_id
+    )
 
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
-            total_records += sync_tags(cur)
-            conn.commit()
+            customer_configs = load_customer_configs(cur, selected_application_id)
 
-            total_records += sync_event_rules(cur)
-            conn.commit()
+            for customer in customer_configs:
+                application_id = customer["application_id"]
+                auth_token = customer["token"]
 
-            total_records += sync_reports(cur)
-            conn.commit()
+                log(f"Starting customer dimension sync for app {application_id}")
 
-            total_records += sync_vehicles_and_drivers(cur)
-            conn.commit()
+                total_records += sync_tags(cur, application_id, auth_token)
+                conn.commit()
 
-            total_records += sync_vehicle_custom_fields(cur)
-            conn.commit()
+                total_records += sync_event_rules(cur, application_id, auth_token)
+                conn.commit()
 
-    log(f"✅ Completed in {round(time.time() - start, 2)}s - Total records: {total_records:,}")
+                total_records += sync_reports(cur, application_id, auth_token)
+                conn.commit()
+
+                total_records += sync_vehicles_and_drivers(cur, application_id, auth_token)
+                conn.commit()
+
+                total_records += sync_vehicle_custom_fields(cur, application_id, auth_token)
+                conn.commit()
+
+                update_customer_config_from_dims(cur, application_id)
+                conn.commit()
+
+    log(f"Completed in {round(time.time() - start, 2)}s - Total records: {total_records:,}")
     return total_records
+
 
 if __name__ == "__main__":
     main()

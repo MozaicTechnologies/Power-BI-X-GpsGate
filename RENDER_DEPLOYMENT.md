@@ -107,7 +107,7 @@ For automatic weekly data pulls, use Render's cron job feature:
 curl -X POST https://your-render-service-url/backfill \
   -H "Content-Type: application/json" \
   -d '{
-    "app_id": "6",
+    "app_id": "93",
     "token": "YOUR_GPSGATE_TOKEN",
     "base_url": "https://omantracking2.com"
   }'

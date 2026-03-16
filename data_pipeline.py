@@ -1082,8 +1082,7 @@ def process_event_data(event_name, response_key):
     tag_id = data.get("tag_id")
     event_id = data.get("event_id")
 
-    # Primary report IDs
-    report_id = "1225" if event_name == "Trip" else "25"
+    report_id = data.get("report_id")
     
     # Fallback report IDs - only use VERIFIED IDs from your system
     fallback_report_ids = {
@@ -1104,10 +1103,11 @@ def process_event_data(event_name, response_key):
             render_id = None
             successful_report_id = None
             
-            # Try primary report ID first, then fallbacks
-            report_ids_to_try = fallback_report_ids.get(event_name, fallback_report_ids["default"])
-            if report_id not in report_ids_to_try:
-                report_ids_to_try = [report_id] + report_ids_to_try
+            # Prefer the caller's configured report_id. Only use hardcoded fallbacks when none was supplied.
+            if report_id:
+                report_ids_to_try = [str(report_id)]
+            else:
+                report_ids_to_try = fallback_report_ids.get(event_name, fallback_report_ids["default"])
             
             for try_report_id in report_ids_to_try:
                 logger.info(f"Trying report_id={try_report_id} for event={event_name}")
@@ -1169,7 +1169,7 @@ def process_event_data(event_name, response_key):
                     report_id=str(successful_report_id),
                     render_id=render_id,
                     event_id=str(event_id) if event_name != "Trip" else None,
-                    timestamp=datetime.now(timezone.utc),
+                    created_at=datetime.now(timezone.utc),
                 )
                 db.session.add(new_render)
                 db.session.commit()
