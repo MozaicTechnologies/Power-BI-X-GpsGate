@@ -83,7 +83,11 @@ def export_unresolved_rows(cur, output_path: Path) -> int:
     return len(rows)
 
 
-def ensure_application_id_on_custom_fields(cur, default_application_id: int | None) -> None:
+def ensure_application_id_on_custom_fields(
+    cur,
+    default_application_id: int | None,
+    delete_unresolved: bool = False,
+) -> None:
     if not column_exists(cur, "dim_vehicle_custom_fields", "application_id"):
         log("Adding application_id to dim_vehicle_custom_fields")
         cur.execute(
@@ -140,11 +144,28 @@ def ensure_application_id_on_custom_fields(cur, default_application_id: int | No
     if missing:
         output_path = Path("output") / "dim_vehicle_custom_fields_unresolved.json"
         exported = export_unresolved_rows(cur, output_path)
+        if delete_unresolved:
+            log(
+                "Deleting unresolved dim_vehicle_custom_fields rows "
+                f"with null application_id ({missing} rows)"
+            )
+            cur.execute(
+                """
+                delete from dim_vehicle_custom_fields
+                where application_id is null
+                """
+            )
+            return ensure_application_id_on_custom_fields(
+                cur,
+                default_application_id=default_application_id,
+                delete_unresolved=False,
+            )
         raise RuntimeError(
             "dim_vehicle_custom_fields still has "
             f"{missing} rows with null application_id. "
             f"Exported {exported} unresolved rows to {output_path}. "
-            "Rerun with --default-application-id <id> if you want to force-fill them."
+            "Rerun with --default-application-id <id> if you want to force-fill them, "
+            "or rerun with --delete-unresolved to drop orphan rows."
         )
 
     cur.execute(
@@ -175,6 +196,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         help="Force-fill unresolved dim_vehicle_custom_fields rows with this application_id",
     )
+    parser.add_argument(
+        "--delete-unresolved",
+        action="store_true",
+        help="Delete unresolved dim_vehicle_custom_fields rows that still cannot be mapped",
+    )
     return parser.parse_args()
 
 
@@ -189,7 +215,11 @@ def main() -> int:
 
     with psycopg.connect(db_url) as conn:
         with conn.cursor() as cur:
-            ensure_application_id_on_custom_fields(cur, args.default_application_id)
+            ensure_application_id_on_custom_fields(
+                cur,
+                args.default_application_id,
+                delete_unresolved=args.delete_unresolved,
+            )
 
             for table_name in TABLES:
                 replace_primary_key(cur, table_name, f"{table_name}_pkey", "application_id, id")

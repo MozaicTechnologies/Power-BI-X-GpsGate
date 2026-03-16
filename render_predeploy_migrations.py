@@ -30,7 +30,11 @@ def main() -> int:
             ensure_customer_config_schema(cur)
 
             log("Ensuring multi-app dimension schema")
-            ensure_application_id_on_custom_fields(cur, default_application_id=None)
+            ensure_application_id_on_custom_fields(
+                cur,
+                default_application_id=None,
+                delete_unresolved=True,
+            )
             for table_name in TABLES:
                 replace_primary_key(cur, table_name, f"{table_name}_pkey", "application_id, id")
             replace_primary_key(
