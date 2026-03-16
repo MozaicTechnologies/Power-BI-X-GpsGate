@@ -121,6 +121,17 @@ def process_event_with_dates(app, event_type, start_date, end_date, customer=Non
             return response_tuple
 
 
+def iter_week_ranges(start_date: str, end_date: str):
+    """Yield inclusive 7-day windows between start_date and end_date."""
+    current = datetime.strptime(start_date, "%Y-%m-%d").date()
+    final = datetime.strptime(end_date, "%Y-%m-%d").date()
+
+    while current <= final:
+        week_end = min(current + timedelta(days=6), final)
+        yield current.strftime("%Y-%m-%d"), week_end.strftime("%Y-%m-%d")
+        current = week_end + timedelta(days=1)
+
+
 # ------------------------------------------------------------------
 # MANUAL JOB EXECUTORS (Run in background threads)
 # ------------------------------------------------------------------
@@ -176,6 +187,55 @@ def execute_fact_sync_job(job_id, start_date, end_date, application_id=None):
             # Process all event types (server state issue resolved)
             event_types = list(EVENT_CONFIG.keys())
             customer = get_dashboard_customer(application_id)
+
+            week_ranges = list(iter_week_ranges(start_date, end_date))
+            results = {}
+            total_inserted = 0
+            total_skipped = 0
+            total_failed = 0
+
+            for week_start, week_end in week_ranges:
+                week_key = f"{week_start} -> {week_end}"
+                results[week_key] = {}
+                for event_type in event_types:
+                    try:
+                        logger.info(f"Processing {event_type} for {week_key}")
+                        result = process_event_with_dates(
+                            app=app,
+                            event_type=event_type,
+                            start_date=week_start,
+                            end_date=week_end,
+                            customer=customer
+                        )
+                        results[week_key][event_type] = result
+                        total_inserted += result.get('inserted', 0)
+                        total_skipped += result.get('skipped', 0)
+                        total_failed += result.get('failed', 0)
+                    except Exception as e:
+                        logger.error(f"Fact sync failed for {event_type} {week_key}: {str(e)}")
+                        results[week_key][event_type] = {'status': 'failed', 'error': str(e)}
+                        total_failed += 1
+
+            job.status = 'completed'
+            job.completed_at = datetime.utcnow()
+            job.records_processed = total_inserted
+            job.errors = total_failed
+            job.job_metadata = {
+                'results': results,
+                'start_date': start_date,
+                'end_date': end_date,
+                'total_events_processed': len(event_types),
+                'application_id': str(customer.application_id),
+                'weeks_processed': len(week_ranges),
+                'total_skipped': total_skipped,
+            }
+            db.session.commit()
+
+            logger.info(
+                f"Fact sync completed: {total_inserted} inserted, "
+                f"{total_skipped} skipped, {total_failed} failed"
+            )
+            return
             
             results = {}
             total_inserted = 0
@@ -245,6 +305,55 @@ def execute_full_backfill_job(job_id, start_date, end_date, application_id=None)
             # Step 2: Sync facts
             event_types = ['Trip', 'Speeding', 'Idle', 'AWH', 'WH', 'HA', 'HB', 'WU']
             customer = get_dashboard_customer(application_id)
+
+            week_ranges = list(iter_week_ranges(start_date, end_date))
+            results = {}
+            total_inserted = 0
+            total_skipped = 0
+            total_failed = 0
+
+            for week_start, week_end in week_ranges:
+                week_key = f"{week_start} -> {week_end}"
+                results[week_key] = {}
+                for event_type in event_types:
+                    try:
+                        result = process_event_with_dates(
+                            app=app,
+                            event_type=event_type,
+                            start_date=week_start,
+                            end_date=week_end,
+                            customer=customer
+                        )
+                        results[week_key][event_type] = result
+                        total_inserted += result.get('inserted', 0)
+                        total_skipped += result.get('skipped', 0)
+                        total_failed += result.get('failed', 0)
+                    except Exception as e:
+                        logger.error(f"Full backfill failed for {event_type} {week_key}: {str(e)}")
+                        results[week_key][event_type] = {'status': 'failed', 'error': str(e)}
+                        total_failed += 1
+
+            job.status = 'completed'
+            job.completed_at = datetime.utcnow()
+            job.records_processed = total_inserted
+            job.errors = total_failed
+            job.job_metadata = {
+                'dimensions': 'synced from GpsGate API',
+                'facts': results,
+                'start_date': start_date,
+                'end_date': end_date,
+                'application_id': str(customer.application_id),
+                'weeks_processed': len(week_ranges),
+                'total_skipped': total_skipped,
+            }
+            db.session.commit()
+
+            logger.info(
+                f"Full backfill completed: {total_inserted} inserted, "
+                f"{total_skipped} skipped, {total_failed} failed"
+            )
+            return
+
             results = {}
             total_inserted = 0
             total_failed = 0
@@ -1389,6 +1498,32 @@ def dashboard_page():
                 console.error('Failed to refresh stats:', error);
             }
         }
+
+        function formatJobMetadata(job) {
+            const metadata = job.metadata || {};
+            const details = [];
+
+            if (metadata.application_id) {
+                details.push(`Customer: ${metadata.application_id}`);
+            }
+            if (metadata.start_date && metadata.end_date) {
+                details.push(`Range: ${metadata.start_date} to ${metadata.end_date}`);
+            }
+            if (metadata.weeks_processed) {
+                details.push(`Weeks: ${metadata.weeks_processed}`);
+            }
+            if (metadata.total_skipped) {
+                details.push(`Skipped: ${Number(metadata.total_skipped).toLocaleString()}`);
+            }
+            if (metadata.total_records) {
+                details.push(`Total Records: ${Number(metadata.total_records).toLocaleString()}`);
+            }
+            if (metadata.message) {
+                details.push(metadata.message);
+            }
+
+            return details.length ? details.join('<br>') + '<br>' : '';
+        }
         
         async function refreshJobs() {
             try {
@@ -1397,19 +1532,20 @@ def dashboard_page():
                 if (data.success) {
                     const jobList = document.getElementById('job-list');
                     jobList.innerHTML = data.jobs.map(job => `
-                        <div class="job-item ${job.status}">
-                            <div class="job-header">
-                                <span class="job-type">${job.job_type}</span>
-                                <span class="job-status ${job.status}">${job.status}</span>
-                            </div>
-                            <div class="job-details">
-                                Started: ${new Date(job.started_at).toLocaleString()}<br>
-                                ${job.completed_at ? 'Completed: ' + new Date(job.completed_at).toLocaleString() + '<br>' : ''}
-                                ${job.records_processed ? 'Records: ' + job.records_processed.toLocaleString() + '<br>' : ''}
-                                ${job.error_message ? 'Error: ' + job.error_message : ''}
-                            </div>
-                        </div>
-                    `).join('');
+	                        <div class="job-item ${job.status}">
+	                            <div class="job-header">
+	                                <span class="job-type">${job.job_type}</span>
+	                                <span class="job-status ${job.status}">${job.status}</span>
+	                            </div>
+	                            <div class="job-details">
+	                                Started: ${new Date(job.started_at).toLocaleString()}<br>
+	                                ${job.completed_at ? 'Completed: ' + new Date(job.completed_at).toLocaleString() + '<br>' : ''}
+	                                ${formatJobMetadata(job)}
+	                                ${job.records_processed ? 'Records: ' + job.records_processed.toLocaleString() + '<br>' : ''}
+	                                ${job.error_message ? 'Error: ' + job.error_message : ''}
+	                            </div>
+	                        </div>
+	                    `).join('');
                 }
             } catch (error) {
                 console.error('Failed to refresh jobs:', error);
@@ -1447,13 +1583,14 @@ def dashboard_page():
                     const dailyDiv = document.getElementById('daily-scheduler-status');
                     if (data.daily_syncs.length > 0) {
                         dailyDiv.innerHTML = data.daily_syncs.slice(0, 5).map(job => `
-                            <div style="padding: 8px; margin: 5px 0; background: ${job.status === 'completed' ? '#d4edda' : job.status === 'failed' ? '#f8d7da' : '#fff3cd'}; border-radius: 4px; font-size: 0.9rem;">
-                                <strong>${new Date(job.started_at).toLocaleString()}</strong>
-                                <span style="float: right; font-weight: 600; color: ${job.status === 'completed' ? '#28a745' : job.status === 'failed' ? '#dc3545' : '#ffc107'};">${job.status.toUpperCase()}</span><br>
-                                ${job.records_processed ? `Records: ${job.records_processed.toLocaleString()}` : ''}
-                                ${job.error_message ? `<br>Error: ${job.error_message}` : ''}
-                            </div>
-                        `).join('');
+	                            <div style="padding: 8px; margin: 5px 0; background: ${job.status === 'completed' ? '#d4edda' : job.status === 'failed' ? '#f8d7da' : '#fff3cd'}; border-radius: 4px; font-size: 0.9rem;">
+	                                <strong>${new Date(job.started_at).toLocaleString()}</strong>
+	                                <span style="float: right; font-weight: 600; color: ${job.status === 'completed' ? '#28a745' : job.status === 'failed' ? '#dc3545' : '#ffc107'};">${job.status.toUpperCase()}</span><br>
+	                                ${formatJobMetadata(job)}
+	                                ${job.records_processed ? `Records: ${job.records_processed.toLocaleString()}` : ''}
+	                                ${job.error_message ? `<br>Error: ${job.error_message}` : ''}
+	                            </div>
+	                        `).join('');
                     } else {
                         dailyDiv.innerHTML = '<em style="color: #666;">No daily syncs yet</em>';
                     }
@@ -1462,13 +1599,14 @@ def dashboard_page():
                     const weeklyDiv = document.getElementById('weekly-scheduler-status');
                     if (data.weekly_backfills.length > 0) {
                         weeklyDiv.innerHTML = data.weekly_backfills.slice(0, 5).map(job => `
-                            <div style="padding: 8px; margin: 5px 0; background: ${job.status === 'completed' ? '#d4edda' : job.status === 'failed' ? '#f8d7da' : '#fff3cd'}; border-radius: 4px; font-size: 0.9rem;">
-                                <strong>${new Date(job.started_at).toLocaleString()}</strong>
-                                <span style="float: right; font-weight: 600; color: ${job.status === 'completed' ? '#28a745' : job.status === 'failed' ? '#dc3545' : '#ffc107'};">${job.status.toUpperCase()}</span><br>
-                                ${job.records_processed ? `Records: ${job.records_processed.toLocaleString()}` : ''}
-                                ${job.error_message ? `<br>Error: ${job.error_message}` : ''}
-                            </div>
-                        `).join('');
+	                            <div style="padding: 8px; margin: 5px 0; background: ${job.status === 'completed' ? '#d4edda' : job.status === 'failed' ? '#f8d7da' : '#fff3cd'}; border-radius: 4px; font-size: 0.9rem;">
+	                                <strong>${new Date(job.started_at).toLocaleString()}</strong>
+	                                <span style="float: right; font-weight: 600; color: ${job.status === 'completed' ? '#28a745' : job.status === 'failed' ? '#dc3545' : '#ffc107'};">${job.status.toUpperCase()}</span><br>
+	                                ${formatJobMetadata(job)}
+	                                ${job.records_processed ? `Records: ${job.records_processed.toLocaleString()}` : ''}
+	                                ${job.error_message ? `<br>Error: ${job.error_message}` : ''}
+	                            </div>
+	                        `).join('');
                     } else {
                         weeklyDiv.innerHTML = '<em style="color: #666;">No weekly backfills yet</em>';
                     }
