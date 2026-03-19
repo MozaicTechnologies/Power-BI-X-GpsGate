@@ -46,10 +46,44 @@ def serialize_customer_config(customer: CustomerConfig) -> dict:
     return {
         "application_id": customer.application_id,
         "token": mask_token(customer.token),
+        "tag_name": customer.tag_name,
+        "trip_report_name": customer.trip_report_name,
+        "event_report_name": customer.event_report_name,
+        "speed_event_rule_name": customer.speed_event_rule_name,
+        "idle_event_rule_name": customer.idle_event_rule_name,
+        "awh_event_rule_name": customer.awh_event_rule_name,
+        "ha_event_rule_name": customer.ha_event_rule_name,
+        "hb_event_rule_name": customer.hb_event_rule_name,
+        "hc_event_rule_name": customer.hc_event_rule_name,
+        "wu_event_rule_name": customer.wu_event_rule_name,
+        "wh_event_rule_name": customer.wh_event_rule_name,
         "tag_id": customer.tag_id,
         "trip_report_id": customer.trip_report_id,
         "event_report_id": customer.event_report_id,
+        "speed_event_id": customer.speed_event_id,
+        "idle_event_id": customer.idle_event_id,
+        "awh_event_id": customer.awh_event_id,
+        "ha_event_id": customer.ha_event_id,
+        "hb_event_id": customer.hb_event_id,
+        "hc_event_id": customer.hc_event_id,
+        "wu_event_id": customer.wu_event_id,
+        "wh_event_id": customer.wh_event_id,
     }
+
+
+NAME_TO_ID_FIELD_MAP = {
+    "tag_name": "tag_id",
+    "trip_report_name": "trip_report_id",
+    "event_report_name": "event_report_id",
+    "speed_event_rule_name": "speed_event_id",
+    "idle_event_rule_name": "idle_event_id",
+    "awh_event_rule_name": "awh_event_id",
+    "ha_event_rule_name": "ha_event_id",
+    "hb_event_rule_name": "hb_event_id",
+    "hc_event_rule_name": "hc_event_id",
+    "wu_event_rule_name": "wu_event_id",
+    "wh_event_rule_name": "wh_event_id",
+}
 
 
 def get_dashboard_customer(application_id: str | None = None) -> CustomerConfig:
@@ -433,6 +467,11 @@ def save_customer_config():
         data = request.get_json() or {}
         application_id = str(data.get('application_id', '')).strip()
         token = str(data.get('token', '')).strip()
+        name_fields = {
+            field_name: str(data.get(field_name, '')).strip() or None
+            for field_name in NAME_TO_ID_FIELD_MAP
+            if field_name in data
+        }
 
         if not application_id or not token:
             return jsonify({
@@ -447,17 +486,17 @@ def save_customer_config():
             db.session.add(customer)
 
         customer.token = token
-        customer.tag_id = None
-        customer.trip_report_id = None
-        customer.event_report_id = None
-        customer.awh_event_id = None
-        customer.ha_event_id = None
-        customer.hb_event_id = None
-        customer.hc_event_id = None
-        customer.wu_event_id = None
-        customer.wh_event_id = None
-        customer.speed_event_id = None
-        customer.idle_event_id = None
+
+        changed_name_fields = []
+        for field_name, new_value in name_fields.items():
+            old_value = getattr(customer, field_name)
+            if old_value != new_value:
+                changed_name_fields.append(field_name)
+                setattr(customer, field_name, new_value)
+
+        for field_name in changed_name_fields:
+            setattr(customer, NAME_TO_ID_FIELD_MAP[field_name], None)
+
         db.session.commit()
 
         return jsonify({
@@ -1119,6 +1158,54 @@ def dashboard_page():
                     <label for="customer-token">Customer Token</label>
                     <textarea id="customer-token" placeholder="Paste GPSGate token"></textarea>
                 </div>
+
+                <details style="margin-bottom: 15px;">
+                    <summary style="cursor: pointer; font-weight: 600; color: #555;">Advanced Mapping Names</summary>
+                    <div class="form-group" style="margin-top: 12px;">
+                        <label for="customer-tag-name">Tag Name</label>
+                        <input type="text" id="customer-tag-name" placeholder="e.g. Show on Map">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-trip-report-name">Trip Report Name</label>
+                        <input type="text" id="customer-trip-report-name" placeholder="e.g. Trip & Idle Power BI Format">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-event-report-name">Event Report Name</label>
+                        <input type="text" id="customer-event-report-name" placeholder="e.g. Event Rule detailed (Tag)">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-speed-event-rule-name">Speed Event Rule Name</label>
+                        <input type="text" id="customer-speed-event-rule-name" placeholder="e.g. Over Speeding +150km/h">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-idle-event-rule-name">Idle Event Rule Name</label>
+                        <input type="text" id="customer-idle-event-rule-name" placeholder="e.g. 30 min idle">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-awh-event-rule-name">AWH Event Rule Name</label>
+                        <input type="text" id="customer-awh-event-rule-name" placeholder="e.g. After Working Hours Usage">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-ha-event-rule-name">HA Event Rule Name</label>
+                        <input type="text" id="customer-ha-event-rule-name" placeholder="e.g. Harsh Acceleration">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-hb-event-rule-name">HB Event Rule Name</label>
+                        <input type="text" id="customer-hb-event-rule-name" placeholder="e.g. Harsh Braking">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-hc-event-rule-name">HC Event Rule Name</label>
+                        <input type="text" id="customer-hc-event-rule-name" placeholder="e.g. Harsh Cornering">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-wu-event-rule-name">WU Event Rule Name</label>
+                        <input type="text" id="customer-wu-event-rule-name" placeholder="e.g. Weekend Usage">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-wh-event-rule-name">WH Event Rule Name</label>
+                        <input type="text" id="customer-wh-event-rule-name" placeholder="e.g. Working Hours Usage">
+                    </div>
+                </details>
                 
                 <div class="form-group">
                     <button onclick="saveCustomerConfig()">
@@ -1305,6 +1392,44 @@ def dashboard_page():
             return document.getElementById('manual-application-id').value.trim();
         }
 
+        function collectCustomerConfigPayload() {
+            return {
+                application_id: document.getElementById('customer-app-id').value.trim(),
+                token: document.getElementById('customer-token').value.trim(),
+                tag_name: document.getElementById('customer-tag-name').value.trim(),
+                trip_report_name: document.getElementById('customer-trip-report-name').value.trim(),
+                event_report_name: document.getElementById('customer-event-report-name').value.trim(),
+                speed_event_rule_name: document.getElementById('customer-speed-event-rule-name').value.trim(),
+                idle_event_rule_name: document.getElementById('customer-idle-event-rule-name').value.trim(),
+                awh_event_rule_name: document.getElementById('customer-awh-event-rule-name').value.trim(),
+                ha_event_rule_name: document.getElementById('customer-ha-event-rule-name').value.trim(),
+                hb_event_rule_name: document.getElementById('customer-hb-event-rule-name').value.trim(),
+                hc_event_rule_name: document.getElementById('customer-hc-event-rule-name').value.trim(),
+                wu_event_rule_name: document.getElementById('customer-wu-event-rule-name').value.trim(),
+                wh_event_rule_name: document.getElementById('customer-wh-event-rule-name').value.trim()
+            };
+        }
+
+        function clearCustomerConfigForm() {
+            [
+                'customer-app-id',
+                'customer-token',
+                'customer-tag-name',
+                'customer-trip-report-name',
+                'customer-event-report-name',
+                'customer-speed-event-rule-name',
+                'customer-idle-event-rule-name',
+                'customer-awh-event-rule-name',
+                'customer-ha-event-rule-name',
+                'customer-hb-event-rule-name',
+                'customer-hc-event-rule-name',
+                'customer-wu-event-rule-name',
+                'customer-wh-event-rule-name'
+            ].forEach(id => {
+                document.getElementById(id).value = '';
+            });
+        }
+
         async function refreshCustomerConfigs() {
             try {
                 const response = await fetch('/dashboard/customer-config');
@@ -1336,9 +1461,16 @@ def dashboard_page():
                         </div>
                         <div class="job-details">
                             Token: ${customer.token}<br>
-                            Trip Report: ${customer.trip_report_id || '-'}<br>
-                            Event Report: ${customer.event_report_id || '-'}<br>
-                            Tag: ${customer.tag_id || '-'}
+                            Tag Name: ${customer.tag_name || '-'}<br>
+                            Tag ID: ${customer.tag_id || '-'}<br>
+                            Trip Report Name: ${customer.trip_report_name || '-'}<br>
+                            Trip Report ID: ${customer.trip_report_id || '-'}<br>
+                            Event Report Name: ${customer.event_report_name || '-'}<br>
+                            Event Report ID: ${customer.event_report_id || '-'}<br>
+                            Speed Rule Name: ${customer.speed_event_rule_name || '-'}<br>
+                            Speed Rule ID: ${customer.speed_event_id || '-'}<br>
+                            Idle Rule Name: ${customer.idle_event_rule_name || '-'}<br>
+                            Idle Rule ID: ${customer.idle_event_id || '-'}
                         </div>
                     </div>
                 `).join('');
@@ -1348,8 +1480,9 @@ def dashboard_page():
         }
 
         async function saveCustomerConfig() {
-            const applicationId = document.getElementById('customer-app-id').value.trim();
-            const token = document.getElementById('customer-token').value.trim();
+            const payload = collectCustomerConfigPayload();
+            const applicationId = payload.application_id;
+            const token = payload.token;
 
             if (!applicationId || !token) {
                 showCustomerConfigMessage('error', 'Please enter both application ID and token');
@@ -1360,13 +1493,12 @@ def dashboard_page():
                 const response = await fetch('/dashboard/customer-config', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({application_id: applicationId, token})
+                    body: JSON.stringify(payload)
                 });
                 const data = await response.json();
                 showCustomerConfigMessage(data.success ? 'success' : 'error', data.message || data.error);
                 if (data.success) {
-                    document.getElementById('customer-app-id').value = '';
-                    document.getElementById('customer-token').value = '';
+                    clearCustomerConfigForm();
                     refreshCustomerConfigs();
                 }
             } catch (error) {

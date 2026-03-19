@@ -27,23 +27,31 @@ if DATABASE_URL.startswith("postgresql+psycopg://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql+psycopg://", "postgresql://")
 
 
-TAG_NAME = "Show on Map"
 NORMALIZED_NAME_SQL = "regexp_replace(lower(trim(name)), '^[^a-z0-9]+|[^a-z0-9]+$', '', 'g')"
 
-REPORT_MAP = {
-    "trip_report_id": ["Trip and Idle (Tag)-BI Format"],
-    "event_report_id": ["Event Rule detailed (Tag)", "Event Rule detailed (User)"],
-}
+NAME_LOOKUP_FIELDS = (
+    "tag_name",
+    "trip_report_name",
+    "event_report_name",
+    "speed_event_rule_name",
+    "idle_event_rule_name",
+    "awh_event_rule_name",
+    "ha_event_rule_name",
+    "hb_event_rule_name",
+    "hc_event_rule_name",
+    "wu_event_rule_name",
+    "wh_event_rule_name",
+)
 
-EVENT_RULE_MAP = {
-    "Over Speeding +150km/h": "speed_event_id",
-    "30 min idle": "idle_event_id",
-    "After Working Hours Usage": "awh_event_id",
-    "Harsh Acceleration": "ha_event_id",
-    "Harsh Braking": "hb_event_id",
-    "Harsh Cornering": "hc_event_id",
-    "Weekend Usage": "wu_event_id",
-    "Working Hours Usage": "wh_event_id",
+EVENT_RULE_NAME_TO_ID_FIELD = {
+    "speed_event_rule_name": "speed_event_id",
+    "idle_event_rule_name": "idle_event_id",
+    "awh_event_rule_name": "awh_event_id",
+    "ha_event_rule_name": "ha_event_id",
+    "hb_event_rule_name": "hb_event_id",
+    "hc_event_rule_name": "hc_event_id",
+    "wu_event_rule_name": "wu_event_id",
+    "wh_event_rule_name": "wh_event_id",
 }
 
 
@@ -78,33 +86,40 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_customer_configs(cur, only_application_id: str | None = None) -> list[dict]:
+    select_columns = ", ".join(
+        ["application_id::text", "token", *NAME_LOOKUP_FIELDS]
+    )
     if only_application_id:
         cur.execute(
             """
-            select application_id::text, token
+            select {select_columns}
             from customer_config
             where application_id = %s
             order by application_id
-            """,
+            """.format(select_columns=select_columns),
             (str(only_application_id),),
         )
     else:
         cur.execute(
             """
-            select application_id::text, token
+            select {select_columns}
             from customer_config
             order by application_id
-            """
+            """.format(select_columns=select_columns)
         )
 
     rows = cur.fetchall()
-    configs = [
-        {
+    configs = []
+    for row in rows:
+        application_id = row[0]
+        token = row[1]
+        config = {
             "application_id": int(application_id),
             "token": normalize_token(token),
         }
-        for application_id, token in rows
-    ]
+        for field_name, value in zip(NAME_LOOKUP_FIELDS, row[2:]):
+            config[field_name] = (value or "").strip() or None
+        configs.append(config)
 
     if configs:
         return configs
@@ -115,7 +130,9 @@ def load_customer_configs(cur, only_application_id: str | None = None) -> list[d
     raise RuntimeError("No customer_config rows found")
 
 
-def lookup_tag_id(cur, application_id: int) -> str | None:
+def lookup_tag_id(cur, application_id: int, tag_name: str | None) -> str | None:
+    if not tag_name:
+        return None
     cur.execute(
         f"""
         select id::text
@@ -125,7 +142,7 @@ def lookup_tag_id(cur, application_id: int) -> str | None:
         order by id
         limit 1
         """,
-        (application_id, normalize_lookup_name(TAG_NAME)),
+        (application_id, normalize_lookup_name(tag_name)),
     )
     row = cur.fetchone()
     return row[0] if row else None
@@ -138,10 +155,16 @@ def lookup_named_ids(
     application_id: int,
     names_to_columns: dict[str, str],
 ) -> dict[str, str]:
-    normalized_names = {
-        normalize_lookup_name(name): column_name
-        for name, column_name in names_to_columns.items()
-    }
+    normalized_names = {}
+    for name, column_name in names_to_columns.items():
+        normalized_name = normalize_lookup_name(name)
+        if not normalized_name:
+            continue
+        normalized_names[normalized_name] = column_name
+
+    if not normalized_names:
+        return {}
+
     cur.execute(
         f"""
         select id::text, {NORMALIZED_NAME_SQL} as normalized_name
@@ -160,90 +183,79 @@ def lookup_named_ids(
     return values
 
 
-def lookup_report_ids(cur, application_id: int) -> dict[str, str]:
-    normalized_candidates = {
-        column_name: [normalize_lookup_name(name) for name in candidate_names]
-        for column_name, candidate_names in REPORT_MAP.items()
-    }
-    all_candidates = [
-        candidate
-        for candidate_names in normalized_candidates.values()
-        for candidate in candidate_names
-    ]
-
-    cur.execute(
-        f"""
-        select id::text, {NORMALIZED_NAME_SQL} as normalized_name
-        from dim_reports
-        where application_id = %s
-          and {NORMALIZED_NAME_SQL} = any(%s)
-        order by normalized_name, id
-        """,
-        (application_id, all_candidates),
+def lookup_report_ids(cur, application_id: int, report_names_to_columns: dict[str, str]) -> dict[str, str]:
+    return lookup_named_ids(
+        cur,
+        table_name="dim_reports",
+        application_id=application_id,
+        names_to_columns=report_names_to_columns,
     )
 
-    available_by_name: dict[str, str] = {}
-    for record_id, normalized_name in cur.fetchall():
-        available_by_name.setdefault(normalized_name, record_id)
 
-    result: dict[str, str] = {}
-    for column_name, candidate_names in normalized_candidates.items():
-        for candidate_name in candidate_names:
-            if candidate_name in available_by_name:
-                result[column_name] = available_by_name[candidate_name]
-                break
-    return result
-
-
-def update_customer_config_from_dims(cur, application_id: int) -> None:
+def update_customer_config_from_dims(cur, customer_config: dict) -> None:
+    application_id = customer_config["application_id"]
     customer_config_application_id = str(application_id)
-    report_ids = lookup_report_ids(cur, application_id)
+    report_ids = lookup_report_ids(
+        cur,
+        application_id,
+        {
+            customer_config["trip_report_name"]: "trip_report_id",
+            customer_config["event_report_name"]: "event_report_id",
+        },
+    )
     event_rule_ids = lookup_named_ids(
         cur,
         table_name="dim_event_rules",
         application_id=application_id,
-        names_to_columns=EVENT_RULE_MAP,
+        names_to_columns={
+            customer_config[field_name]: id_field
+            for field_name, id_field in EVENT_RULE_NAME_TO_ID_FIELD.items()
+        },
     )
 
-    payload = {
-        "application_id": customer_config_application_id,
-        "tag_id": lookup_tag_id(cur, application_id),
-        "trip_report_id": report_ids.get("trip_report_id"),
-        "event_report_id": report_ids.get("event_report_id"),
-        "speed_event_id": event_rule_ids.get("speed_event_id"),
-        "idle_event_id": event_rule_ids.get("idle_event_id"),
-        "awh_event_id": event_rule_ids.get("awh_event_id"),
-        "ha_event_id": event_rule_ids.get("ha_event_id"),
-        "hb_event_id": event_rule_ids.get("hb_event_id"),
-        "hc_event_id": event_rule_ids.get("hc_event_id"),
-        "wu_event_id": event_rule_ids.get("wu_event_id"),
-        "wh_event_id": event_rule_ids.get("wh_event_id"),
-    }
+    payload = {"application_id": customer_config_application_id}
+    set_clauses = []
+    missing = []
 
-    cur.execute(
-        """
-        update customer_config
-        set tag_id = %(tag_id)s,
-            trip_report_id = %(trip_report_id)s,
-            event_report_id = %(event_report_id)s,
-            speed_event_id = %(speed_event_id)s,
-            idle_event_id = %(idle_event_id)s,
-            awh_event_id = %(awh_event_id)s,
-            ha_event_id = %(ha_event_id)s,
-            hb_event_id = %(hb_event_id)s,
-            hc_event_id = %(hc_event_id)s,
-            wu_event_id = %(wu_event_id)s,
-            wh_event_id = %(wh_event_id)s
-        where application_id = %(application_id)s
-        """,
-        payload,
-    )
+    if customer_config.get("tag_name"):
+        payload["tag_id"] = lookup_tag_id(cur, application_id, customer_config["tag_name"])
+        set_clauses.append("tag_id = %(tag_id)s")
+        if payload["tag_id"] is None:
+            missing.append("tag_id")
 
-    missing = [
-        column_name
-        for column_name, value in payload.items()
-        if column_name != "application_id" and value is None
-    ]
+    if customer_config.get("trip_report_name"):
+        payload["trip_report_id"] = report_ids.get("trip_report_id")
+        set_clauses.append("trip_report_id = %(trip_report_id)s")
+        if payload["trip_report_id"] is None:
+            missing.append("trip_report_id")
+
+    if customer_config.get("event_report_name"):
+        payload["event_report_id"] = report_ids.get("event_report_id")
+        set_clauses.append("event_report_id = %(event_report_id)s")
+        if payload["event_report_id"] is None:
+            missing.append("event_report_id")
+
+    for name_field, id_field in EVENT_RULE_NAME_TO_ID_FIELD.items():
+        if not customer_config.get(name_field):
+            continue
+        payload[id_field] = event_rule_ids.get(id_field)
+        set_clauses.append(f"{id_field} = %({id_field})s")
+        if payload[id_field] is None:
+            missing.append(id_field)
+
+    if set_clauses:
+        cur.execute(
+            f"""
+            update customer_config
+            set {", ".join(set_clauses)}
+            where application_id = %(application_id)s
+            """,
+            payload,
+        )
+    else:
+        log(f"customer_config for app {application_id} has no mapping names configured", "WARN")
+        return
+
     if missing:
         log(
             f"customer_config updated for app {application_id} with missing mappings: {', '.join(sorted(missing))}",
@@ -571,7 +583,7 @@ def main(only_application_id: str | int | None = None) -> int:
                 total_records += sync_vehicle_custom_fields(cur, application_id, auth_token)
                 conn.commit()
 
-                update_customer_config_from_dims(cur, application_id)
+                update_customer_config_from_dims(cur, customer)
                 conn.commit()
 
     log(f"Completed in {round(time.time() - start, 2)}s - Total records: {total_records:,}")

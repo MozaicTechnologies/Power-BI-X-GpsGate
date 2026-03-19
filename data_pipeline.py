@@ -828,6 +828,7 @@ MAX_EXECUTION_SECONDS = 600
 BASE_SERVICE_URL = os.getenv("BACKEND_HOST", "http://127.0.0.1:5000")
 RENDER_URL = f"{BASE_SERVICE_URL}/render"
 RESULT_URL = f"{BASE_SERVICE_URL}/result"
+RESULT_TIMEOUT = (10, 360)
 
 MAX_WEEKS_TRIP_WH = 1
 MAX_WEEKS_OTHER = 1
@@ -1123,11 +1124,22 @@ def process_event_data(event_name, response_key):
                 ).first()
 
                 if render:
-                    render_id = render.render_id
-                    successful_report_id = try_report_id
-                    logger.debug(f"Using cached render_id={render_id} with report_id={try_report_id}")
-                    break
-                else:
+                    cached_result = Result.query.filter_by(render_id=str(render.render_id)).first()
+                    if cached_result and cached_result.gdrive_link:
+                        render_id = render.render_id
+                        successful_report_id = try_report_id
+                        logger.debug(
+                            f"Using cached render_id={render_id} with cached result for report_id={try_report_id}"
+                        )
+                        break
+
+                    logger.info(
+                        f"Cached render_id={render.render_id} for event={event_name} "
+                        f"has no cached result; requesting a fresh render"
+                    )
+                    render = None
+
+                if not render:
                     payload = {
                         "app_id": app_id,
                         "period_start": week["week_start"],
@@ -1188,16 +1200,37 @@ def process_event_data(event_name, response_key):
                     "report_id": successful_report_id or report_id,
                 }
                 gdrive_link = None
-                for _ in range(3):
-                    res = RESILIENT_SESSION.post(RESULT_URL, data=payload, timeout=(10, 120))
+                result_started_at = pytime.time()
+                logger.info(
+                    f"Calling /result event={event_name} render_id={render_id} "
+                    f"timeout={RESULT_TIMEOUT[1]}s max_attempts=3"
+                )
+                for attempt in range(1, 4):
+                    logger.info(
+                        f"/result attempt={attempt}/3 event={event_name} render_id={render_id}"
+                    )
+                    res = requests.post(RESULT_URL, data=payload, timeout=RESULT_TIMEOUT)
+                    logger.info(
+                        f"/result response attempt={attempt}/3 event={event_name} "
+                        f"render_id={render_id} status={res.status_code}"
+                    )
                     if res.status_code == 200:
                         gdrive_link = res.json().get("gdrive_link")
                         if gdrive_link:
+                            elapsed = pytime.time() - result_started_at
+                            logger.info(
+                                f"/result completed event={event_name} render_id={render_id} "
+                                f"elapsed={elapsed:.1f}s"
+                            )
                             break
                     pytime.sleep(5)
 
                 if not gdrive_link:
-                    logger.error("Result fetch failed")
+                    elapsed = pytime.time() - result_started_at
+                    logger.error(
+                        f"Result fetch failed event={event_name} render_id={render_id} "
+                        f"elapsed={elapsed:.1f}s"
+                    )
                     continue
 
             # ---------------- DOWNLOAD ----------------
@@ -1220,7 +1253,11 @@ def process_event_data(event_name, response_key):
 
             logger.info(
                 f"DB RESULT event={event_name} "
-                f"inserted={stats['inserted']} skipped={stats['skipped']} failed={stats['failed']}"
+                f"inserted={stats['inserted']} "
+                f"skipped={stats['skipped']} "
+                f"invalid_rows_skipped={stats.get('invalid_rows_skipped', 0)} "
+                f"duplicate_rows_skipped={stats.get('duplicate_rows_skipped', 0)} "
+                f"failed={stats['failed']}"
             )
 
             weeks_processed += 1

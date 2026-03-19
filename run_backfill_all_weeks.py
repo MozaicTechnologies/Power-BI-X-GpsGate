@@ -19,9 +19,9 @@ from datetime import date, timedelta
 
 BACKFILL_SCRIPT = "backfill_2025_week1.py"
 
-START_DATE = date(2025, 4, 8)
+START_DATE = date(2026, 1, 8)
 # TODAY = date.today()
-TODAY = date(2025, 4, 29)
+TODAY = date(2026, 3, 18)
 
 
 PYTHON_BIN = sys.executable  # uses current venv python

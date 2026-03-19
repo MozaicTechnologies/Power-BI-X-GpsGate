@@ -497,6 +497,17 @@ class CustomerConfig(db.Model):
 
     application_id = db.Column(db.String(50), primary_key=True)
     token = db.Column(db.Text, nullable=False)
+    tag_name = db.Column(db.String(255))
+    trip_report_name = db.Column(db.String(255))
+    event_report_name = db.Column(db.String(255))
+    speed_event_rule_name = db.Column(db.String(255))
+    idle_event_rule_name = db.Column(db.String(255))
+    awh_event_rule_name = db.Column(db.String(255))
+    ha_event_rule_name = db.Column(db.String(255))
+    hb_event_rule_name = db.Column(db.String(255))
+    hc_event_rule_name = db.Column(db.String(255))
+    wu_event_rule_name = db.Column(db.String(255))
+    wh_event_rule_name = db.Column(db.String(255))
     tag_id = db.Column(db.String(50))
 
     trip_report_id = db.Column(db.String(50))

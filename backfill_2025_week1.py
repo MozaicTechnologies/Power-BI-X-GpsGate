@@ -96,22 +96,35 @@ def build_payload(customer, endpoint: dict, week_start: datetime, week_end: date
     return payload
 
 
-def validate_customer(customer) -> list[str]:
+def validate_customer_shared(customer) -> list[str]:
     missing = []
     required_values = [
+        ("application_id", customer.application_id),
+        ("token", customer.token),
         ("tag_id", customer.tag_id),
-        ("trip_report_id", customer.trip_report_id),
-        ("event_report_id", customer.event_report_id),
     ]
 
     for field_name, value in required_values:
         if not value:
             missing.append(field_name)
 
-    for endpoint in ENDPOINTS:
-        field_name = endpoint["event_id_col"]
-        if field_name and not getattr(customer, field_name):
-            missing.append(field_name)
+    return missing
+
+
+def validate_endpoint(customer, endpoint: dict) -> list[str]:
+    missing = []
+
+    if endpoint["name"] == "Trip":
+        if not customer.trip_report_id:
+            missing.append("trip_report_id")
+        return missing
+
+    if not customer.event_report_id:
+        missing.append("event_report_id")
+
+    field_name = endpoint["event_id_col"]
+    if field_name and not getattr(customer, field_name):
+        missing.append(field_name)
 
     return missing
 
@@ -164,7 +177,7 @@ def main() -> int:
             print(f"CUSTOMER: application_id={customer.application_id}")
             print(f"{'=' * 80}")
 
-            missing = validate_customer(customer)
+            missing = validate_customer_shared(customer)
             if missing:
                 print(
                     f"[BACKFILL] Skipping application_id={customer.application_id} - missing config: {sorted(set(missing))}",
@@ -178,6 +191,15 @@ def main() -> int:
             for idx, endpoint in enumerate(ENDPOINTS, start=1):
                 print(f"\n[{idx}/{len(ENDPOINTS)}] application_id={customer.application_id} -> {endpoint['name']}")
                 print("-" * 80)
+
+                endpoint_missing = validate_endpoint(customer, endpoint)
+                if endpoint_missing:
+                    print(
+                        f"[BACKFILL] Skipping event {endpoint['name']} for application_id={customer.application_id} "
+                        f"- missing config: {sorted(set(endpoint_missing))}",
+                        flush=True,
+                    )
+                    continue
 
                 payload = build_payload(customer, endpoint, week_start, week_end)
                 accounting = run_event(endpoint, payload)

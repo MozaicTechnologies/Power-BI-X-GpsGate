@@ -391,7 +391,13 @@ def store_event_data_to_db(df, app_id, tag_id, event_name):
     logger.info("[DB_STORAGE] FAST MODE ENABLED")
 
     if df is None or df.empty:
-        return {"inserted": 0, "skipped": 0, "failed": 0}
+        return {
+            "inserted": 0,
+            "skipped": 0,
+            "failed": 0,
+            "invalid_rows_skipped": 0,
+            "duplicate_rows_skipped": 0,
+        }
 
     table = {
         "Trip": "fact_trip",
@@ -405,16 +411,22 @@ def store_event_data_to_db(df, app_id, tag_id, event_name):
     }.get(event_name)
 
     if not table:
-        return {"inserted": 0, "skipped": 0, "failed": 0}
+        return {
+            "inserted": 0,
+            "skipped": 0,
+            "failed": 0,
+            "invalid_rows_skipped": 0,
+            "duplicate_rows_skipped": 0,
+        }
 
     records = []
-    skipped = failed = 0
+    invalid_rows_skipped = failed = 0
 
     for _, row in df.iterrows():
         try:
             vehicle = str(row.get("Vehicle", "")).strip()
             if not vehicle:
-                skipped += 1
+                invalid_rows_skipped += 1
                 continue
 
             driver = (
@@ -433,7 +445,7 @@ def store_event_data_to_db(df, app_id, tag_id, event_name):
                 stop_dt = pd.to_datetime(row.get("Stop Time"), errors="coerce")
 
                 if pd.isna(start_dt):
-                    skipped += 1
+                    invalid_rows_skipped += 1
                     continue
 
                 base = {
@@ -460,7 +472,7 @@ def store_event_data_to_db(df, app_id, tag_id, event_name):
                 start_time = pd.to_datetime(row.get("Start Time"), errors="coerce")
 
                 if pd.isna(start_date) or pd.isna(start_time):
-                    skipped += 1
+                    invalid_rows_skipped += 1
                     continue
 
                 event_time = datetime.combine(
@@ -502,7 +514,13 @@ def store_event_data_to_db(df, app_id, tag_id, event_name):
             failed += 1
 
     if not records:
-        return {"inserted": 0, "skipped": skipped, "failed": failed}
+        return {
+            "inserted": 0,
+            "skipped": invalid_rows_skipped,
+            "failed": failed,
+            "invalid_rows_skipped": invalid_rows_skipped,
+            "duplicate_rows_skipped": 0,
+        }
 
     cols = records[0].keys()
     sql = f"""
@@ -520,10 +538,22 @@ def store_event_data_to_db(df, app_id, tag_id, event_name):
         except ResourceClosedError:
             inserted = result.rowcount if result.rowcount and result.rowcount > 0 else 0
         duplicate_skipped = max(0, len(records) - inserted)
-        total_skipped = skipped + duplicate_skipped
+        total_skipped = invalid_rows_skipped + duplicate_skipped
         db.session.commit()
-        return {"inserted": inserted, "skipped": total_skipped, "failed": failed}
+        return {
+            "inserted": inserted,
+            "skipped": total_skipped,
+            "failed": failed,
+            "invalid_rows_skipped": invalid_rows_skipped,
+            "duplicate_rows_skipped": duplicate_skipped,
+        }
     except Exception:
         db.session.rollback()
         logger.exception(f"[DB_STORAGE] {event_name} insert failed")
-        return {"inserted": 0, "skipped": skipped, "failed": len(records)}
+        return {
+            "inserted": 0,
+            "skipped": invalid_rows_skipped,
+            "failed": len(records),
+            "invalid_rows_skipped": invalid_rows_skipped,
+            "duplicate_rows_skipped": 0,
+        }
