@@ -137,6 +137,11 @@ def run_weekly_backfill():
                 "end_date": end_str,
                 "total_raw": total_raw,
                 "total_skipped": total_skipped,
+                "total_records": total_raw,
+                "message": (
+                    f"Weekly backfill completed - raw fact rows {total_raw:,}, "
+                    f"inserted {total_inserted:,}"
+                ),
                 "results": results,
                 "total_customers_processed": len(customers),
             }

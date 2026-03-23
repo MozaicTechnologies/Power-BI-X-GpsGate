@@ -1638,11 +1638,20 @@ def dashboard_page():
             if (metadata.application_id) {
                 details.push(`Customer: ${metadata.application_id}`);
             }
+            if (metadata.date) {
+                details.push(`Date: ${metadata.date}`);
+            }
             if (metadata.start_date && metadata.end_date) {
                 details.push(`Range: ${metadata.start_date} to ${metadata.end_date}`);
             }
             if (metadata.weeks_processed) {
                 details.push(`Weeks: ${metadata.weeks_processed}`);
+            }
+            if (metadata.dimension_records) {
+                details.push(`Dimension Records: ${Number(metadata.dimension_records).toLocaleString()}`);
+            }
+            if (metadata.total_raw) {
+                details.push(`Raw Records: ${Number(metadata.total_raw).toLocaleString()}`);
             }
             if (metadata.total_skipped) {
                 details.push(`Skipped: ${Number(metadata.total_skipped).toLocaleString()}`);

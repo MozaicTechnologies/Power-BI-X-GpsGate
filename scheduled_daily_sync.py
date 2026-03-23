@@ -132,6 +132,8 @@ def run_daily_sync():
 
                 results[str(customer.application_id)] = app_results
 
+            total_records = total_raw + dimension_records
+
             job.status = "completed"
             job.completed_at = datetime.utcnow()
             job.records_processed = total_inserted + dimension_records
@@ -141,6 +143,11 @@ def run_daily_sync():
                 "dimension_records": dimension_records,
                 "total_raw": total_raw,
                 "total_skipped": total_skipped,
+                "total_records": total_records,
+                "message": (
+                    f"Daily sync completed - dimensions {dimension_records:,}, "
+                    f"raw fact rows {total_raw:,}, inserted {total_inserted:,}"
+                ),
                 "fact_results": results,
                 "total_customers_processed": len(customers),
             }
