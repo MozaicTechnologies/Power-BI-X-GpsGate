@@ -1080,14 +1080,6 @@ def cleanup_data():
             operations.append(f"Deleted {deleted} job execution records")
         else:
             operations.append("No job execution records found")
-                    total_deleted += job_deleted
-            else:
-                logger.debug("ADMIN CLEANUP: Job execution table does not exist - skipping")
-                operations.append("Job execution table does not exist - skipped")
-        except Exception as e:
-            error_msg = f"Failed to delete job execution records: {str(e)}"
-            logger.error(f"ADMIN CLEANUP ERROR: {error_msg}")
-            errors.append(error_msg)
 
         logger.info(f"ADMIN CLEANUP COMPLETED: Total deleted={total_deleted}, operations={len(operations)}, errors={len(errors)} for application_id={application_id}, table_type={table_type}")
 
