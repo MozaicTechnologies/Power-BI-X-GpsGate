@@ -912,7 +912,7 @@ def cleanup_data():
         api_key = data.get('api_key')
 
         # Validate API key (should be set as environment variable)
-        expected_key = os.getenv('ADMIN_CLEANUP_KEY', 'demo-admin-key-2026')  # Demo key for development
+        expected_key = os.getenv('ADMIN_CLEANUP_KEY')  # Demo key for development
         if api_key != expected_key:
             return jsonify({
                 'success': False,
