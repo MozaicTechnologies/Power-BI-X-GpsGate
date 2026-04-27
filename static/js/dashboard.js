@@ -68,54 +68,59 @@ function clearCustomerConfigForm() {
     });
 }
 
-async function refreshCustomerConfigs() {
-    try {
-        const response = await fetch('/dashboard/customer-config');
-        const data = await response.json();
-        const list = document.getElementById('customer-config-list');
-        const select = document.getElementById('manual-application-id');
-        const currentSelection = select.value;
-        if (!data.success) {
-            list.innerHTML = '<em style="color: #666;">Failed to load customer config</em>';
-            return;
+        async function refreshCustomerConfigs() {
+            try {
+                const response = await fetch('/dashboard/customer-config');
+                const data = await response.json();
+                const list = document.getElementById('customer-config-list');
+                const select = document.getElementById('manual-application-id');
+                const cleanupSelect = document.getElementById('cleanup-application-id');
+                const currentSelection = select.value;
+                if (!data.success) {
+                    list.innerHTML = '<em style="color: #666;">Failed to load customer config</em>';
+                    return;
+                }
+                if (!data.customers.length) {
+                    list.innerHTML = '<em style="color: #666;">No customer_config rows yet</em>';
+                    select.innerHTML = '<option value="">Select customer</option>';
+                    cleanupSelect.innerHTML = '<option value="">Select customer</option>';
+                    return;
+                }
+                select.innerHTML = '<option value="">Select customer</option>' + data.customers.map(customer => `
+                    <option value="${customer.application_id}">App ${customer.application_id}</option>
+                `).join('');
+                cleanupSelect.innerHTML = '<option value="">Select customer</option>' + data.customers.map(customer => `
+                    <option value="${customer.application_id}">App ${customer.application_id}</option>
+                `).join('');
+                if (currentSelection && data.customers.some(customer => customer.application_id === currentSelection)) {
+                    select.value = currentSelection;
+                } else {
+                    select.value = data.customers[0].application_id;
+                }
+                list.innerHTML = data.customers.map(customer => `
+                    <div class="job-item" style="padding: 10px; margin-bottom: 8px;">
+                        <div class="job-header">
+                            <span class="job-type">App ${customer.application_id}</span>
+                        </div>
+                        <div class="job-details">
+                            Token: ${customer.token}<br>
+                            Tag Name: ${customer.tag_name || '-'}<br>
+                            Tag ID: ${customer.tag_id || '-'}<br>
+                            Trip Report Name: ${customer.trip_report_name || '-'}<br>
+                            Trip Report ID: ${customer.trip_report_id || '-'}<br>
+                            Event Report Name: ${customer.event_report_name || '-'}<br>
+                            Event Report ID: ${customer.event_report_id || '-'}<br>
+                            Speed Rule Name: ${customer.speed_event_rule_name || '-'}<br>
+                            Speed Rule ID: ${customer.speed_event_id || '-'}<br>
+                            Idle Rule Name: ${customer.idle_event_rule_name || '-'}<br>
+                            Idle Rule ID: ${customer.idle_event_id || '-'}
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Failed to refresh customer config:', error);
+            }
         }
-        if (!data.customers.length) {
-            list.innerHTML = '<em style="color: #666;">No customer_config rows yet</em>';
-            select.innerHTML = '<option value="">Select customer</option>';
-            return;
-        }
-        select.innerHTML = '<option value="">Select customer</option>' + data.customers.map(customer => `
-            <option value="${customer.application_id}">App ${customer.application_id}</option>
-        `).join('');
-        if (currentSelection && data.customers.some(customer => customer.application_id === currentSelection)) {
-            select.value = currentSelection;
-        } else {
-            select.value = data.customers[0].application_id;
-        }
-        list.innerHTML = data.customers.map(customer => `
-            <div class="job-item" style="padding: 10px; margin-bottom: 8px;">
-                <div class="job-header">
-                    <span class="job-type">App ${customer.application_id}</span>
-                </div>
-                <div class="job-details">
-                    Token: ${customer.token}<br>
-                    Tag Name: ${customer.tag_name || '-'}<br>
-                    Tag ID: ${customer.tag_id || '-'}<br>
-                    Trip Report Name: ${customer.trip_report_name || '-'}<br>
-                    Trip Report ID: ${customer.trip_report_id || '-'}<br>
-                    Event Report Name: ${customer.event_report_name || '-'}<br>
-                    Event Report ID: ${customer.event_report_id || '-'}<br>
-                    Speed Rule Name: ${customer.speed_event_rule_name || '-'}<br>
-                    Speed Rule ID: ${customer.speed_event_id || '-'}<br>
-                    Idle Rule Name: ${customer.idle_event_rule_name || '-'}<br>
-                    Idle Rule ID: ${customer.idle_event_id || '-'}
-                </div>
-            </div>
-        `).join('');
-    } catch (error) {
-        console.error('Failed to refresh customer config:', error);
-    }
-}
 
 async function saveCustomerConfig() {
     const payload = collectCustomerConfigPayload();
@@ -399,6 +404,8 @@ async function refreshSchedulerStatus() {
         console.error('Failed to refresh scheduler status:', error);
     }
 }
+
+
 
 // Initialize dashboard
 refreshJobs();

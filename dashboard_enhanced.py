@@ -9,6 +9,7 @@ import traceback
 import threading
 import json
 import requests
+import os
 from models import (
     db,
     CustomerConfig,
@@ -895,6 +896,117 @@ def get_ip_info():
         }), 500
         
     except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@dashboard_bp.route('/cleanup', methods=['POST'])
+def cleanup_data():
+    """Clean up (delete) data for a specific customer - DANGEROUS OPERATION"""
+    try:
+        data = request.get_json() or {}
+        table_type = data.get('table_type')
+        application_id = str(data.get('application_id', '')).strip()
+        api_key = data.get('api_key')
+
+        # Validate API key (should be set as environment variable)
+        expected_key = os.getenv('ADMIN_CLEANUP_KEY', 'demo-admin-key-2026')  # Demo key for development
+        if api_key != expected_key:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid admin API key'
+            }), 403
+
+        if not table_type or not application_id:
+            return jsonify({
+                'success': False,
+                'error': 'table_type and application_id are required'
+            }), 400
+
+        # Validate table type
+        if table_type not in ['fact', 'dimension', 'both']:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid table_type. Must be fact, dimension, or both'
+            }), 400
+
+        total_deleted = 0
+        operations = []
+
+        with db.session.begin():
+            if table_type in ['fact', 'both']:
+                # Delete from fact tables
+                fact_tables = [
+                    ('fact_trip', 'Trip'),
+                    ('fact_speeding', 'Speeding'),
+                    ('fact_idle', 'Idle'),
+                    ('fact_awh', 'AWH'),
+                    ('fact_wh', 'WH'),
+                    ('fact_ha', 'HA'),
+                    ('fact_hb', 'HB'),
+                    ('fact_wu', 'WU'),
+                ]
+
+                for table_name, display_name in fact_tables:
+                    try:
+                        result = db.session.execute(
+                            db.text(f"DELETE FROM {table_name} WHERE application_id = :app_id"),
+                            {'app_id': application_id}
+                        )
+                        deleted = result.rowcount
+                        total_deleted += deleted
+                        if deleted > 0:
+                            operations.append(f"Deleted {deleted} records from {display_name}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete from {table_name}: {e}")
+
+            if table_type in ['dimension', 'both']:
+                # Delete from dimension tables (be careful with shared data)
+                # Note: Dimensions might be shared across applications, so this is potentially dangerous
+                dim_tables = [
+                    ('dim_drivers', 'Drivers'),
+                    ('dim_vehicles', 'Vehicles'),
+                    ('dim_tags', 'Tags'),
+                    ('dim_reports', 'Reports'),
+                    ('dim_event_rules', 'EventRules'),
+                    ('dim_vehicle_custom_fields', 'CustomFields')
+                ]
+
+                for table_name, display_name in dim_tables:
+                    try:
+                        result = db.session.execute(
+                            db.text(f"DELETE FROM {table_name} WHERE application_id = :app_id"),
+                            {'app_id': application_id}
+                        )
+                        deleted = result.rowcount
+                        total_deleted += deleted
+                        if deleted > 0:
+                            operations.append(f"Deleted {deleted} records from {display_name}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete from {table_name}: {e}")
+
+            # Also delete JobExecution records for this application
+            job_result = db.session.execute(
+                db.text("DELETE FROM job_execution WHERE job_metadata->>'application_id' = :app_id"),
+                {'app_id': application_id}
+            )
+            job_deleted = job_result.rowcount
+            if job_deleted > 0:
+                operations.append(f"Deleted {job_deleted} job execution records")
+
+        logger.warning(f"ADMIN CLEANUP: Deleted {total_deleted} total records for application_id={application_id}, table_type={table_type}")
+
+        return jsonify({
+            'success': True,
+            'message': f'Successfully deleted {total_deleted} records for application_id={application_id}',
+            'operations': operations,
+            'total_deleted': total_deleted
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to cleanup data: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)
