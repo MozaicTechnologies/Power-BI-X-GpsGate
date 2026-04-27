@@ -934,23 +934,75 @@ def cleanup_data():
 
         total_deleted = 0
         operations = []
+        errors = []
 
-        with db.session.begin():
-            if table_type in ['fact', 'both']:
-                # Delete from fact tables
-                fact_tables = [
-                    ('fact_trip', 'Trip'),
-                    ('fact_speeding', 'Speeding'),
-                    ('fact_idle', 'Idle'),
-                    ('fact_awh', 'AWH'),
-                    ('fact_wh', 'WH'),
-                    ('fact_ha', 'HA'),
-                    ('fact_hb', 'HB'),
-                    ('fact_wu', 'WU'),
-                ]
+        # Perform deletions one by one to avoid transaction abortion
+        if table_type in ['fact', 'both']:
+            # Delete from fact tables
+            fact_tables = [
+                ('fact_trip', 'Trip'),
+                ('fact_speeding', 'Speeding'),
+                ('fact_idle', 'Idle'),
+                ('fact_awh', 'AWH'),
+                ('fact_wh', 'WH'),
+                ('fact_ha', 'HA'),
+                ('fact_hb', 'HB'),
+                ('fact_wu', 'WU'),
+            ]
 
-                for table_name, display_name in fact_tables:
-                    try:
+            for table_name, display_name in fact_tables:
+                try:
+                    # Check if table exists first
+                    table_exists = db.session.execute(
+                        db.text("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = :table_name)"),
+                        {'table_name': table_name}
+                    ).scalar()
+
+                    if not table_exists:
+                        operations.append(f"Table {display_name} does not exist - skipped")
+                        continue
+
+                    with db.session.begin():
+                        result = db.session.execute(
+                            db.text(f"DELETE FROM {table_name} WHERE app_id = :app_id"),
+                            {'app_id': application_id}
+                        )
+                        deleted = result.rowcount
+                        total_deleted += deleted
+                        if deleted > 0:
+                            operations.append(f"Deleted {deleted} records from {display_name}")
+                        else:
+                            operations.append(f"No records found in {display_name}")
+                except Exception as e:
+                    error_msg = f"Failed to delete from {table_name}: {str(e)}"
+                    logger.warning(error_msg)
+                    errors.append(error_msg)
+
+        if table_type in ['dimension', 'both']:
+            # Delete from dimension tables (be careful with shared data)
+            # Note: Dimensions might be shared across applications, so this is potentially dangerous
+            dim_tables = [
+                ('dim_drivers', 'Drivers'),
+                ('dim_vehicles', 'Vehicles'),
+                ('dim_tags', 'Tags'),
+                ('dim_reports', 'Reports'),
+                ('dim_event_rules', 'EventRules'),
+                ('dim_vehicle_custom_fields', 'CustomFields')
+            ]
+
+            for table_name, display_name in dim_tables:
+                try:
+                    # Check if table exists first
+                    table_exists = db.session.execute(
+                        db.text("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = :table_name)"),
+                        {'table_name': table_name}
+                    ).scalar()
+
+                    if not table_exists:
+                        operations.append(f"Table {display_name} does not exist - skipped")
+                        continue
+
+                    with db.session.begin():
                         result = db.session.execute(
                             db.text(f"DELETE FROM {table_name} WHERE application_id = :app_id"),
                             {'app_id': application_id}
@@ -959,50 +1011,51 @@ def cleanup_data():
                         total_deleted += deleted
                         if deleted > 0:
                             operations.append(f"Deleted {deleted} records from {display_name}")
-                    except Exception as e:
-                        logger.warning(f"Failed to delete from {table_name}: {e}")
+                        else:
+                            operations.append(f"No records found in {display_name}")
+                except Exception as e:
+                    error_msg = f"Failed to delete from {table_name}: {str(e)}"
+                    logger.warning(error_msg)
+                    errors.append(error_msg)
 
-            if table_type in ['dimension', 'both']:
-                # Delete from dimension tables (be careful with shared data)
-                # Note: Dimensions might be shared across applications, so this is potentially dangerous
-                dim_tables = [
-                    ('dim_drivers', 'Drivers'),
-                    ('dim_vehicles', 'Vehicles'),
-                    ('dim_tags', 'Tags'),
-                    ('dim_reports', 'Reports'),
-                    ('dim_event_rules', 'EventRules'),
-                    ('dim_vehicle_custom_fields', 'CustomFields')
-                ]
+        # Delete JobExecution records for this application
+        try:
+            # Check if table exists first
+            table_exists = db.session.execute(
+                db.text("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'job_execution')")
+            ).scalar()
 
-                for table_name, display_name in dim_tables:
-                    try:
-                        result = db.session.execute(
-                            db.text(f"DELETE FROM {table_name} WHERE application_id = :app_id"),
-                            {'app_id': application_id}
-                        )
-                        deleted = result.rowcount
-                        total_deleted += deleted
-                        if deleted > 0:
-                            operations.append(f"Deleted {deleted} records from {display_name}")
-                    except Exception as e:
-                        logger.warning(f"Failed to delete from {table_name}: {e}")
-
-            # Also delete JobExecution records for this application
-            job_result = db.session.execute(
-                db.text("DELETE FROM job_execution WHERE job_metadata->>'application_id' = :app_id"),
-                {'app_id': application_id}
-            )
-            job_deleted = job_result.rowcount
-            if job_deleted > 0:
-                operations.append(f"Deleted {job_deleted} job execution records")
+            if table_exists:
+                with db.session.begin():
+                    job_result = db.session.execute(
+                        db.text("DELETE FROM job_execution WHERE job_metadata->>'application_id' = :app_id"),
+                        {'app_id': application_id}
+                    )
+                    job_deleted = job_result.rowcount
+                    if job_deleted > 0:
+                        operations.append(f"Deleted {job_deleted} job execution records")
+                    else:
+                        operations.append("No job execution records found")
+                    total_deleted += job_deleted
+            else:
+                operations.append("Job execution table does not exist - skipped")
+        except Exception as e:
+            error_msg = f"Failed to delete job execution records: {str(e)}"
+            logger.warning(error_msg)
+            errors.append(error_msg)
 
         logger.warning(f"ADMIN CLEANUP: Deleted {total_deleted} total records for application_id={application_id}, table_type={table_type}")
 
+        message = f'Successfully deleted {total_deleted} records for application_id={application_id}'
+        if errors:
+            message += f'. {len(errors)} errors occurred - check logs for details'
+
         return jsonify({
             'success': True,
-            'message': f'Successfully deleted {total_deleted} records for application_id={application_id}',
+            'message': message,
             'operations': operations,
-            'total_deleted': total_deleted
+            'total_deleted': total_deleted,
+            'errors': errors if errors else None
         })
 
     except Exception as e:
