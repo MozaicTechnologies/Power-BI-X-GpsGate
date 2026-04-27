@@ -1040,37 +1040,46 @@ def cleanup_data():
                     errors.append(error_msg)
 
         # Delete JobExecution records for this application
-        try:
-            logger.debug("ADMIN CLEANUP: Checking if job_execution table exists")
+        logger.debug("ADMIN CLEANUP: Processing job execution records")
 
-            # Check if table exists first (outside transaction)
-            table_exists = db.session.execute(
-                db.text("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'job_execution')")
-            ).scalar()
-
-            if table_exists:
-                # Start transaction for count and delete
+        # Special function for JobExecution with JSON field
+        def cleanup_job_execution():
+            try:
                 with db.session.begin():
-                    logger.debug(f"ADMIN CLEANUP: Counting job execution records before deletion")
-                    count_before = db.session.execute(
-                        db.text("SELECT COUNT(*) FROM job_execution WHERE job_metadata->>'application_id' = :app_id"),
-                        {'app_id': application_id}
-                    ).scalar()
+                    from sqlalchemy import text
 
+                    # Count records before deletion
+                    count_query = db.session.query(JobExecution).filter(
+                        text("job_metadata->>'application_id' = :app_id")
+                    ).params(app_id=application_id)
+
+                    count_before = count_query.count()
                     logger.info(f"ADMIN CLEANUP: Found {count_before} job execution records for application_id={application_id}")
 
-                    job_result = db.session.execute(
-                        db.text("DELETE FROM job_execution WHERE job_metadata->>'application_id' = :app_id"),
-                        {'app_id': application_id}
-                    )
-                    job_deleted = job_result.rowcount
+                    # Delete records
+                    delete_query = db.session.query(JobExecution).filter(
+                        text("job_metadata->>'application_id' = :app_id")
+                    ).params(app_id=application_id)
 
-                    logger.info(f"ADMIN CLEANUP: Deleted {job_deleted} job execution records (application_id={application_id})")
+                    deleted = delete_query.delete()
+                    logger.info(f"ADMIN CLEANUP: Deleted {deleted} job execution records (application_id={application_id})")
 
-                    if job_deleted > 0:
-                        operations.append(f"Deleted {job_deleted} job execution records")
-                    else:
-                        operations.append("No job execution records found")
+                    return deleted, None
+            except Exception as e:
+                error_msg = f"Failed to delete job execution records: {str(e)}"
+                logger.error(f"ADMIN CLEANUP ERROR in job_execution: {str(e)}")
+                logger.error(f"ADMIN CLEANUP ERROR DETAILS: type={type(e).__name__}, args={e.args}")
+                return 0, error_msg
+
+        deleted, error = cleanup_job_execution()
+        total_deleted += deleted
+
+        if error:
+            errors.append(error)
+        elif deleted > 0:
+            operations.append(f"Deleted {deleted} job execution records")
+        else:
+            operations.append("No job execution records found")
                     total_deleted += job_deleted
             else:
                 logger.debug("ADMIN CLEANUP: Job execution table does not exist - skipping")
