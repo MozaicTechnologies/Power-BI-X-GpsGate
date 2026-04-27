@@ -614,6 +614,7 @@ class DimVehicleCustomFields(db.Model):
     """Dimension table for vehicle custom fields"""
     __tablename__ = "dim_vehicle_custom_fields"
 
+    id = db.Column(db.Integer, primary_key=True)
     vehicle_id = db.Column(db.Integer, nullable=False)
     application_id = db.Column(db.Integer, nullable=False)
     field_name = db.Column(db.String(255), nullable=False)
