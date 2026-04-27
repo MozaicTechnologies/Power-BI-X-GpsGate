@@ -25,10 +25,10 @@ from models import (
 )
 from customer_runtime_config import EVENT_CONFIG, get_event_runtime_config, load_customers
 from data_pipeline import process_event_data
-from logger_config import get_logger
+from utils.logger import setup_logger
 from config import Config
 
-logger = get_logger(__name__)
+logger = setup_logger(__name__)
 
 dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/dashboard')
 
@@ -911,15 +911,19 @@ def cleanup_data():
         application_id = str(data.get('application_id', '')).strip()
         api_key = data.get('api_key')
 
+        logger.info(f"ADMIN CLEANUP REQUEST: table_type={table_type}, application_id={application_id}, api_key_provided={'Yes' if api_key else 'No'}")
+
         # Validate API key (should be set as environment variable)
-        expected_key = os.getenv('ADMIN_CLEANUP_KEY')  # Demo key for development
+        expected_key = os.getenv('ADMIN_CLEANUP_KEY', 'demo-admin-key-2026')  # Demo key for development
         if api_key != expected_key:
+            logger.warning(f"ADMIN CLEANUP FAILED: Invalid API key for application_id={application_id}")
             return jsonify({
                 'success': False,
                 'error': 'Invalid admin API key'
             }), 403
 
         if not table_type or not application_id:
+            logger.warning(f"ADMIN CLEANUP FAILED: Missing required parameters - table_type={table_type}, application_id={application_id}")
             return jsonify({
                 'success': False,
                 'error': 'table_type and application_id are required'
@@ -927,17 +931,21 @@ def cleanup_data():
 
         # Validate table type
         if table_type not in ['fact', 'dimension', 'both']:
+            logger.warning(f"ADMIN CLEANUP FAILED: Invalid table_type={table_type}")
             return jsonify({
                 'success': False,
                 'error': 'Invalid table_type. Must be fact, dimension, or both'
             }), 400
 
+        logger.info(f"ADMIN CLEANUP STARTED: table_type={table_type}, application_id={application_id}")
         total_deleted = 0
         operations = []
         errors = []
 
         # Perform deletions one by one to avoid transaction abortion
         if table_type in ['fact', 'both']:
+            logger.debug(f"ADMIN CLEANUP: Processing fact tables for application_id={application_id}")
+
             # Delete from fact tables
             fact_tables = [
                 ('fact_trip', 'Trip'),
@@ -952,6 +960,8 @@ def cleanup_data():
 
             for table_name, display_name in fact_tables:
                 try:
+                    logger.debug(f"ADMIN CLEANUP: Checking if table {table_name} exists")
+
                     # Check if table exists first
                     table_exists = db.session.execute(
                         db.text("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = :table_name)"),
@@ -959,8 +969,17 @@ def cleanup_data():
                     ).scalar()
 
                     if not table_exists:
+                        logger.debug(f"ADMIN CLEANUP: Table {table_name} does not exist - skipping")
                         operations.append(f"Table {display_name} does not exist - skipped")
                         continue
+
+                    logger.debug(f"ADMIN CLEANUP: Counting records in {table_name} before deletion")
+                    count_before = db.session.execute(
+                        db.text(f"SELECT COUNT(*) FROM {table_name} WHERE app_id = :app_id"),
+                        {'app_id': application_id}
+                    ).scalar()
+
+                    logger.info(f"ADMIN CLEANUP: Found {count_before} records in {table_name} for app_id={application_id}")
 
                     with db.session.begin():
                         result = db.session.execute(
@@ -969,16 +988,21 @@ def cleanup_data():
                         )
                         deleted = result.rowcount
                         total_deleted += deleted
+
+                        logger.info(f"ADMIN CLEANUP: Deleted {deleted} records from {table_name} (app_id={application_id})")
+
                         if deleted > 0:
                             operations.append(f"Deleted {deleted} records from {display_name}")
                         else:
                             operations.append(f"No records found in {display_name}")
                 except Exception as e:
                     error_msg = f"Failed to delete from {table_name}: {str(e)}"
-                    logger.warning(error_msg)
+                    logger.error(f"ADMIN CLEANUP ERROR: {error_msg}")
                     errors.append(error_msg)
 
         if table_type in ['dimension', 'both']:
+            logger.debug(f"ADMIN CLEANUP: Processing dimension tables for application_id={application_id}")
+
             # Delete from dimension tables (be careful with shared data)
             # Note: Dimensions might be shared across applications, so this is potentially dangerous
             dim_tables = [
@@ -992,6 +1016,8 @@ def cleanup_data():
 
             for table_name, display_name in dim_tables:
                 try:
+                    logger.debug(f"ADMIN CLEANUP: Checking if table {table_name} exists")
+
                     # Check if table exists first
                     table_exists = db.session.execute(
                         db.text("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = :table_name)"),
@@ -999,8 +1025,17 @@ def cleanup_data():
                     ).scalar()
 
                     if not table_exists:
+                        logger.debug(f"ADMIN CLEANUP: Table {table_name} does not exist - skipping")
                         operations.append(f"Table {display_name} does not exist - skipped")
                         continue
+
+                    logger.debug(f"ADMIN CLEANUP: Counting records in {table_name} before deletion")
+                    count_before = db.session.execute(
+                        db.text(f"SELECT COUNT(*) FROM {table_name} WHERE application_id = :app_id"),
+                        {'app_id': application_id}
+                    ).scalar()
+
+                    logger.info(f"ADMIN CLEANUP: Found {count_before} records in {table_name} for application_id={application_id}")
 
                     with db.session.begin():
                         result = db.session.execute(
@@ -1009,46 +1044,64 @@ def cleanup_data():
                         )
                         deleted = result.rowcount
                         total_deleted += deleted
+
+                        logger.info(f"ADMIN CLEANUP: Deleted {deleted} records from {table_name} (application_id={application_id})")
+
                         if deleted > 0:
                             operations.append(f"Deleted {deleted} records from {display_name}")
                         else:
                             operations.append(f"No records found in {display_name}")
                 except Exception as e:
                     error_msg = f"Failed to delete from {table_name}: {str(e)}"
-                    logger.warning(error_msg)
+                    logger.error(f"ADMIN CLEANUP ERROR: {error_msg}")
                     errors.append(error_msg)
 
         # Delete JobExecution records for this application
         try:
+            logger.debug("ADMIN CLEANUP: Checking if job_execution table exists")
+
             # Check if table exists first
             table_exists = db.session.execute(
                 db.text("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'job_execution')")
             ).scalar()
 
             if table_exists:
+                logger.debug(f"ADMIN CLEANUP: Counting job execution records before deletion")
+                count_before = db.session.execute(
+                    db.text("SELECT COUNT(*) FROM job_execution WHERE job_metadata->>'application_id' = :app_id"),
+                    {'app_id': application_id}
+                ).scalar()
+
+                logger.info(f"ADMIN CLEANUP: Found {count_before} job execution records for application_id={application_id}")
+
                 with db.session.begin():
                     job_result = db.session.execute(
                         db.text("DELETE FROM job_execution WHERE job_metadata->>'application_id' = :app_id"),
                         {'app_id': application_id}
                     )
                     job_deleted = job_result.rowcount
+
+                    logger.info(f"ADMIN CLEANUP: Deleted {job_deleted} job execution records (application_id={application_id})")
+
                     if job_deleted > 0:
                         operations.append(f"Deleted {job_deleted} job execution records")
                     else:
                         operations.append("No job execution records found")
                     total_deleted += job_deleted
             else:
+                logger.debug("ADMIN CLEANUP: Job execution table does not exist - skipping")
                 operations.append("Job execution table does not exist - skipped")
         except Exception as e:
             error_msg = f"Failed to delete job execution records: {str(e)}"
-            logger.warning(error_msg)
+            logger.error(f"ADMIN CLEANUP ERROR: {error_msg}")
             errors.append(error_msg)
 
-        logger.warning(f"ADMIN CLEANUP: Deleted {total_deleted} total records for application_id={application_id}, table_type={table_type}")
+        logger.info(f"ADMIN CLEANUP COMPLETED: Total deleted={total_deleted}, operations={len(operations)}, errors={len(errors)} for application_id={application_id}, table_type={table_type}")
 
         message = f'Successfully deleted {total_deleted} records for application_id={application_id}'
         if errors:
             message += f'. {len(errors)} errors occurred - check logs for details'
+            logger.warning(f"ADMIN CLEANUP ERRORS: {errors}")
 
         return jsonify({
             'success': True,
@@ -1059,7 +1112,7 @@ def cleanup_data():
         })
 
     except Exception as e:
-        logger.error(f"Failed to cleanup data: {str(e)}")
+        logger.error(f"ADMIN CLEANUP FAILED: Unexpected error - {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)
