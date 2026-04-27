@@ -22,6 +22,12 @@ from models import (
     FactHA,
     FactHB,
     FactWU,
+    DimTags,
+    DimEventRules,
+    DimReports,
+    DimVehicles,
+    DimDrivers,
+    DimVehicleCustomFields,
 )
 from customer_runtime_config import EVENT_CONFIG, get_event_runtime_config, load_customers
 from data_pipeline import process_event_data
@@ -979,64 +985,50 @@ def cleanup_data():
                             operations.append(f"No records found in {display_name}")
                 except Exception as e:
                     error_msg = f"Failed to delete from {display_name}: {str(e)}"
+                    logger.error(f"ADMIN CLEANUP ERROR in {model_class.__tablename__}: {str(e)}")
+                    logger.error(f"ADMIN CLEANUP ERROR DETAILS: type={type(e).__name__}, args={e.args}")
+                    errors.append(error_msg)
+                except Exception as e:
+                    error_msg = f"Failed to delete from {display_name}: {str(e)}"
                     logger.error(f"ADMIN CLEANUP ERROR: {error_msg}")
                     errors.append(error_msg)
 
         if table_type in ['dimension', 'both']:
             logger.debug(f"ADMIN CLEANUP: Processing dimension tables for application_id={application_id}")
 
-            # Delete from dimension tables (using raw SQL since no models exist)
-            # Note: Dimensions might be shared across applications, so this is potentially dangerous
-            dim_tables = [
-                ('dim_drivers', 'Drivers'),
-                ('dim_vehicles', 'Vehicles'),
-                ('dim_tags', 'Tags'),
-                ('dim_reports', 'Reports'),
-                ('dim_event_rules', 'EventRules'),
-                ('dim_vehicle_custom_fields', 'CustomFields')
+            # Delete from dimension tables using SQLAlchemy models
+            dim_models = [
+                (DimDrivers, 'Drivers'),
+                (DimVehicles, 'Vehicles'),
+                (DimTags, 'Tags'),
+                (DimReports, 'Reports'),
+                (DimEventRules, 'EventRules'),
+                (DimVehicleCustomFields, 'CustomFields')
             ]
 
-            for table_name, display_name in dim_tables:
+            for model_class, display_name in dim_models:
                 try:
-                    logger.debug(f"ADMIN CLEANUP: Checking if table {table_name} exists")
+                    logger.debug(f"ADMIN CLEANUP: Processing {model_class.__tablename__}")
 
-                    # Check if table exists first (outside transaction)
-                    table_exists = db.session.execute(
-                        db.text("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = :table_name)"),
-                        {'table_name': table_name}
-                    ).scalar()
-
-                    if not table_exists:
-                        logger.debug(f"ADMIN CLEANUP: Table {table_name} does not exist - skipping")
-                        operations.append(f"Table {display_name} does not exist - skipped")
-                        continue
-
-                    # Start transaction for count and delete
                     with db.session.begin():
-                        logger.debug(f"ADMIN CLEANUP: Counting records in {table_name} before deletion")
-                        count_before = db.session.execute(
-                            db.text(f"SELECT COUNT(*) FROM {table_name} WHERE application_id = :app_id"),
-                            {'app_id': application_id}
-                        ).scalar()
+                        # Count records before deletion
+                        count_before = model_class.query.filter_by(application_id=application_id).count()
+                        logger.info(f"ADMIN CLEANUP: Found {count_before} records in {display_name} for application_id={application_id}")
 
-                        logger.info(f"ADMIN CLEANUP: Found {count_before} records in {table_name} for application_id={application_id}")
-
-                        result = db.session.execute(
-                            db.text(f"DELETE FROM {table_name} WHERE application_id = :app_id"),
-                            {'app_id': application_id}
-                        )
-                        deleted = result.rowcount
+                        # Delete records
+                        deleted = model_class.query.filter_by(application_id=application_id).delete()
                         total_deleted += deleted
 
-                        logger.info(f"ADMIN CLEANUP: Deleted {deleted} records from {table_name} (application_id={application_id})")
+                        logger.info(f"ADMIN CLEANUP: Deleted {deleted} records from {display_name} (application_id={application_id})")
 
                         if deleted > 0:
                             operations.append(f"Deleted {deleted} records from {display_name}")
                         else:
                             operations.append(f"No records found in {display_name}")
                 except Exception as e:
-                    error_msg = f"Failed to delete from {table_name}: {str(e)}"
-                    logger.error(f"ADMIN CLEANUP ERROR: {error_msg}")
+                    error_msg = f"Failed to delete from {display_name}: {str(e)}"
+                    logger.error(f"ADMIN CLEANUP ERROR in {model_class.__tablename__}: {str(e)}")
+                    logger.error(f"ADMIN CLEANUP ERROR DETAILS: type={type(e).__name__}, args={e.args}")
                     errors.append(error_msg)
 
         # Delete JobExecution records for this application
