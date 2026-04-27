@@ -529,96 +529,77 @@ class DimTags(db.Model):
     """Dimension table for tags/groups"""
     __tablename__ = "dim_tags"
 
-    id = db.Column(db.Integer, primary_key=True)
-    application_id = db.Column(db.Integer, nullable=False)
-    name = db.Column(db.String(255), nullable=False)
+    id = db.Column(db.BigInteger, nullable=False, primary_key=True)
+    application_id = db.Column(db.BigInteger, nullable=False, primary_key=True)
+    name = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    __table_args__ = (
-        db.UniqueConstraint("application_id", "id", name="uq_dim_tags"),
-    )
 
 
 class DimEventRules(db.Model):
     """Dimension table for event rules"""
     __tablename__ = "dim_event_rules"
 
-    id = db.Column(db.Integer, primary_key=True)
-    application_id = db.Column(db.Integer, nullable=False)
-    name = db.Column(db.String(255), nullable=False)
+    id = db.Column(db.BigInteger, nullable=False, primary_key=True)
+    application_id = db.Column(db.BigInteger, nullable=False, primary_key=True)
+    name = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    __table_args__ = (
-        db.UniqueConstraint("application_id", "id", name="uq_dim_event_rules"),
-    )
 
 
 class DimReports(db.Model):
     """Dimension table for reports"""
     __tablename__ = "dim_reports"
 
-    id = db.Column(db.Integer, primary_key=True)
-    application_id = db.Column(db.Integer, nullable=False)
-    name = db.Column(db.String(255), nullable=False)
+    id = db.Column(db.BigInteger, nullable=False, primary_key=True)
+    application_id = db.Column(db.BigInteger, nullable=False, primary_key=True)
+    name = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    __table_args__ = (
-        db.UniqueConstraint("application_id", "id", name="uq_dim_reports"),
-    )
 
 
 class DimVehicles(db.Model):
     """Dimension table for vehicles"""
     __tablename__ = "dim_vehicles"
 
-    id = db.Column(db.Integer, primary_key=True)
-    application_id = db.Column(db.Integer, nullable=False)
-    name = db.Column(db.String(255))
-    username = db.Column(db.String(255))
-    imei = db.Column(db.String(50))
+    id = db.Column(db.BigInteger, nullable=False, primary_key=True)
+    application_id = db.Column(db.BigInteger, nullable=False, primary_key=True)
+    name = db.Column(db.Text)
+    username = db.Column(db.Text)
+    driver_id = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    device_name = db.Column(db.Text)
+    imei = db.Column(db.Text)
     latitude = db.Column(db.Float)
     longitude = db.Column(db.Float)
-    last_utc = db.Column(db.DateTime)
-    valid = db.Column(db.Boolean)
-    device_name = db.Column(db.String(255))
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    __table_args__ = (
-        db.UniqueConstraint("application_id", "id", name="uq_dim_vehicles"),
-    )
+    utc = db.Column(db.DateTime)
+    validity = db.Column(db.Boolean)
 
 
 class DimDrivers(db.Model):
     """Dimension table for drivers"""
     __tablename__ = "dim_drivers"
 
-    id = db.Column(db.Integer, primary_key=True)
-    application_id = db.Column(db.Integer, nullable=False)
-    name = db.Column(db.String(255))
-    username = db.Column(db.String(255))
-    driver_id = db.Column(db.Integer)
-    device_name = db.Column(db.String(255))
-    imei = db.Column(db.String(50))
+    id = db.Column(db.BigInteger, nullable=False, primary_key=True)
+    application_id = db.Column(db.BigInteger, nullable=False, primary_key=True)
+    name = db.Column(db.Text)
+    username = db.Column(db.Text)
+    driver_id = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    device_name = db.Column(db.Text)
+    imei = db.Column(db.Text)
     latitude = db.Column(db.Float)
     longitude = db.Column(db.Float)
     utc = db.Column(db.DateTime)
     validity = db.Column(db.Boolean)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    __table_args__ = (
-        db.UniqueConstraint("application_id", "id", name="uq_dim_drivers"),
-    )
 
 
 class DimVehicleCustomFields(db.Model):
     """Dimension table for vehicle custom fields"""
     __tablename__ = "dim_vehicle_custom_fields"
 
-    id = db.Column(db.Integer, primary_key=True)
-    vehicle_id = db.Column(db.Integer, nullable=False)
-    application_id = db.Column(db.Integer, nullable=False)
-    field_name = db.Column(db.String(255), nullable=False)
+    vehicle_id = db.Column(db.BigInteger, nullable=False, primary_key=True)
+    field_name = db.Column(db.Text, nullable=False, primary_key=True)
     field_value = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    application_id = db.Column(db.Integer, nullable=False, primary_key=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     __table_args__ = (
