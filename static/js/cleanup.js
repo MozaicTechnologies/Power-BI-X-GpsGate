@@ -35,11 +35,23 @@ async function confirmCleanup() {
         });
         const data = await response.json();
         showCleanupMessage(data.success ? 'success' : 'error', data.message || data.error);
+
+        // Show detailed operations and errors
+        if (data.operations && data.operations.length > 0) {
+            const details = data.operations.join('<br>');
+            const messageDiv = document.getElementById('cleanup-message');
+            messageDiv.innerHTML += '<br><br><strong>Details:</strong><br>' + details;
+        }
+
+        if (data.errors && data.errors.length > 0) {
+            const errorDetails = data.errors.join('<br>');
+            const messageDiv = document.getElementById('cleanup-message');
+            messageDiv.innerHTML += '<br><br><strong>Errors:</strong><br>' + errorDetails;
+        }
+
         if (data.success) {
-            setTimeout(() => {
-                closeCleanupModal();
-                refreshStats();
-            }, 2000);
+            // Don't auto-close on success, let user see the results
+            refreshStats();
         }
     } catch (error) {
         showCleanupMessage('error', 'Request failed: ' + error.message);
