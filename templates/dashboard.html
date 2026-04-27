@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GpsGate Data Pipeline Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 GpsGate Data Pipeline Dashboard</h1>
+        
+        <div class="grid">
+            <!-- Manual Triggers -->
+            <div class="card">
+                <h2>📊 Manual Triggers</h2>
+                
+                <div class="form-group">
+                    <button onclick="triggerDimensionSync()">
+                        🔄 Run Dimension Sync
+                    </button>
+                </div>
+                
+                <div class="form-group">
+                    <label for="customer-app-id">Customer App ID</label>
+                    <input type="text" id="customer-app-id" placeholder="e.g. 93">
+                </div>
+                
+                <div class="form-group">
+                    <label for="customer-token">Customer Token</label>
+                    <textarea id="customer-token" placeholder="Paste GPSGate token"></textarea>
+                </div>
+
+                <details style="margin-bottom: 15px;">
+                    <summary style="cursor: pointer; font-weight: 600; color: #555;">Advanced Mapping Names</summary>
+                    <div class="form-group" style="margin-top: 12px;">
+                        <label for="customer-tag-name">Tag Name</label>
+                        <input type="text" id="customer-tag-name" placeholder="e.g. Show on Map">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-trip-report-name">Trip Report Name</label>
+                        <input type="text" id="customer-trip-report-name" placeholder="e.g. Trip & Idle Power BI Format">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-event-report-name">Event Report Name</label>
+                        <input type="text" id="customer-event-report-name" placeholder="e.g. Event Rule detailed (Tag)">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-speed-event-rule-name">Speed Event Rule Name</label>
+                        <input type="text" id="customer-speed-event-rule-name" placeholder="e.g. Over Speeding +150km/h">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-idle-event-rule-name">Idle Event Rule Name</label>
+                        <input type="text" id="customer-idle-event-rule-name" placeholder="e.g. 30 min idle">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-awh-event-rule-name">AWH Event Rule Name</label>
+                        <input type="text" id="customer-awh-event-rule-name" placeholder="e.g. After Working Hours Usage">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-ha-event-rule-name">HA Event Rule Name</label>
+                        <input type="text" id="customer-ha-event-rule-name" placeholder="e.g. Harsh Acceleration">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-hb-event-rule-name">HB Event Rule Name</label>
+                        <input type="text" id="customer-hb-event-rule-name" placeholder="e.g. Harsh Braking">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-hc-event-rule-name">HC Event Rule Name</label>
+                        <input type="text" id="customer-hc-event-rule-name" placeholder="e.g. Harsh Cornering">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-wu-event-rule-name">WU Event Rule Name</label>
+                        <input type="text" id="customer-wu-event-rule-name" placeholder="e.g. Weekend Usage">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-wh-event-rule-name">WH Event Rule Name</label>
+                        <input type="text" id="customer-wh-event-rule-name" placeholder="e.g. Working Hours Usage">
+                    </div>
+                </details>
+                
+                <div class="form-group">
+                    <button onclick="saveCustomerConfig()">
+                        Save Customer Config
+                    </button>
+                </div>
+                
+                <div id="customer-config-list" class="job-list" style="max-height: 180px; margin-bottom: 15px;"></div>
+                <div id="customer-config-message" class="message"></div>
+                
+                <div class="form-group">
+                    <label for="manual-application-id">Run For Customer</label>
+                    <select id="manual-application-id">
+                        <option value="">Select customer</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="fact-start">Start Date</label>
+                    <input type="date" id="fact-start" value="">
+                </div>
+                
+                <div class="form-group">
+                    <label for="fact-end">End Date</label>
+                    <input type="date" id="fact-end" value="">
+                </div>
+                
+                <div class="form-group">
+                    <button onclick="triggerFactSync()">
+                        📈 Run Fact Sync
+                    </button>
+                </div>
+                
+                <div class="form-group">
+                    <button onclick="triggerFullBackfill()">
+                        🔥 Run Full Backfill
+                    </button>
+                </div>
+                
+                <div id="trigger-message" class="message"></div>
+            </div>
+            
+            <!-- Live Statistics -->
+            <div class="card">
+                <h2>📈 Live Statistics</h2>
+                <h3 style="color: #667eea; margin-bottom: 10px; font-size: 1.1em;">Fact Tables</h3>
+                <div class="stats-grid" id="stats-grid">
+                    <div class="stat-item">
+                        <div class="stat-value" id="total-count">-</div>
+                        <div class="stat-label">Total Records</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="trip-count">-</div>
+                        <div class="stat-label">Trip</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="speeding-count">-</div>
+                        <div class="stat-label">Speeding</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="idle-count">-</div>
+                        <div class="stat-label">Idle</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="awh-count">-</div>
+                        <div class="stat-label">AWH</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="wh-count">-</div>
+                        <div class="stat-label">WH</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="ha-count">-</div>
+                        <div class="stat-label">HA</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="hb-count">-</div>
+                        <div class="stat-label">HB</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="wu-count">-</div>
+                        <div class="stat-label">WU</div>
+                    </div>
+                </div>
+                <h3 style="color: #764ba2; margin: 20px 0 10px 0; font-size: 1.1em;">Dimension Tables</h3>
+                <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));">
+                    <div class="stat-item">
+                        <div class="stat-value" id="dim-drivers-count">-</div>
+                        <div class="stat-label">Drivers</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="dim-vehicles-count">-</div>
+                        <div class="stat-label">Vehicles</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="dim-tags-count">-</div>
+                        <div class="stat-label">Tags/Groups</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="dim-reports-count">-</div>
+                        <div class="stat-label">Reports</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="dim-eventrules-count">-</div>
+                        <div class="stat-label">Event Rules</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="dim-customfields-count">-</div>
+                        <div class="stat-label">Custom Fields</div>
+                    </div>
+                </div>
+                <button onclick="refreshStats()" style="margin-top: 15px;">
+                    🔄 Refresh Stats
+                </button>
+            </div>
+            
+            <!-- Last Sync Info -->
+            <div class="card">
+                <h2>⏰ Last Sync</h2>
+                <div id="last-sync-info">Loading...</div>
+            </div>
+            
+            <!-- Scheduler Status -->
+            <div class="card" style="grid-column: 1 / -1;">
+                <h2>🕐 Automated Scheduler Status</h2>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                    <div>
+                        <h3 style="color: #667eea; margin-bottom: 10px;">Daily Sync (2 AM UTC)</h3>
+                        <div id="daily-scheduler-status">Loading...</div>
+                    </div>
+                    <div>
+                        <h3 style="color: #667eea; margin-bottom: 10px;">Weekly Backfill (Sunday 3 AM UTC)</h3>
+                        <div id="weekly-scheduler-status">Loading...</div>
+                    </div>
+                </div>
+                <button onclick="refreshSchedulerStatus()" style="margin-top: 15px;">
+                    🔄 Refresh Scheduler Status
+                </button>
+            </div>
+            
+            <!-- Recent Jobs -->
+            <div class="card" style="grid-column: 1 / -1;">
+                <h2>📋 Recent Jobs</h2>
+                <div class="job-list" id="job-list">
+                    Loading...
+                </div>
+                <button onclick="refreshJobs()" style="margin-top: 15px;">
+                    🔄 Refresh Jobs
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>
