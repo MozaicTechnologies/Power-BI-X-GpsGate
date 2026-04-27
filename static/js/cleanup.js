@@ -9,12 +9,6 @@ function closeCleanupModal() {
     document.getElementById('cleanup-modal').style.display = 'none';
 }
 
-function generateRandomKey() {
-    const randomKey = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-    document.getElementById('generated-key').textContent = 'Generated Key: ' + randomKey;
-    document.getElementById('cleanup-api-key').value = randomKey;
-}
-
 async function confirmCleanup() {
     const tableType = document.getElementById('cleanup-table-type').value;
     const applicationId = document.getElementById('cleanup-application-id').value;
