@@ -962,7 +962,7 @@ def cleanup_data():
                 try:
                     logger.debug(f"ADMIN CLEANUP: Checking if table {table_name} exists")
 
-                    # Check if table exists first
+                    # Check if table exists first (outside transaction)
                     table_exists = db.session.execute(
                         db.text("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = :table_name)"),
                         {'table_name': table_name}
@@ -973,15 +973,16 @@ def cleanup_data():
                         operations.append(f"Table {display_name} does not exist - skipped")
                         continue
 
-                    logger.debug(f"ADMIN CLEANUP: Counting records in {table_name} before deletion")
-                    count_before = db.session.execute(
-                        db.text(f"SELECT COUNT(*) FROM {table_name} WHERE app_id = :app_id"),
-                        {'app_id': application_id}
-                    ).scalar()
-
-                    logger.info(f"ADMIN CLEANUP: Found {count_before} records in {table_name} for app_id={application_id}")
-
+                    # Start transaction for count and delete
                     with db.session.begin():
+                        logger.debug(f"ADMIN CLEANUP: Counting records in {table_name} before deletion")
+                        count_before = db.session.execute(
+                            db.text(f"SELECT COUNT(*) FROM {table_name} WHERE app_id = :app_id"),
+                            {'app_id': application_id}
+                        ).scalar()
+
+                        logger.info(f"ADMIN CLEANUP: Found {count_before} records in {table_name} for app_id={application_id}")
+
                         result = db.session.execute(
                             db.text(f"DELETE FROM {table_name} WHERE app_id = :app_id"),
                             {'app_id': application_id}
@@ -1018,7 +1019,7 @@ def cleanup_data():
                 try:
                     logger.debug(f"ADMIN CLEANUP: Checking if table {table_name} exists")
 
-                    # Check if table exists first
+                    # Check if table exists first (outside transaction)
                     table_exists = db.session.execute(
                         db.text("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = :table_name)"),
                         {'table_name': table_name}
@@ -1029,15 +1030,16 @@ def cleanup_data():
                         operations.append(f"Table {display_name} does not exist - skipped")
                         continue
 
-                    logger.debug(f"ADMIN CLEANUP: Counting records in {table_name} before deletion")
-                    count_before = db.session.execute(
-                        db.text(f"SELECT COUNT(*) FROM {table_name} WHERE application_id = :app_id"),
-                        {'app_id': application_id}
-                    ).scalar()
-
-                    logger.info(f"ADMIN CLEANUP: Found {count_before} records in {table_name} for application_id={application_id}")
-
+                    # Start transaction for count and delete
                     with db.session.begin():
+                        logger.debug(f"ADMIN CLEANUP: Counting records in {table_name} before deletion")
+                        count_before = db.session.execute(
+                            db.text(f"SELECT COUNT(*) FROM {table_name} WHERE application_id = :app_id"),
+                            {'app_id': application_id}
+                        ).scalar()
+
+                        logger.info(f"ADMIN CLEANUP: Found {count_before} records in {table_name} for application_id={application_id}")
+
                         result = db.session.execute(
                             db.text(f"DELETE FROM {table_name} WHERE application_id = :app_id"),
                             {'app_id': application_id}
@@ -1060,21 +1062,22 @@ def cleanup_data():
         try:
             logger.debug("ADMIN CLEANUP: Checking if job_execution table exists")
 
-            # Check if table exists first
+            # Check if table exists first (outside transaction)
             table_exists = db.session.execute(
                 db.text("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'job_execution')")
             ).scalar()
 
             if table_exists:
-                logger.debug(f"ADMIN CLEANUP: Counting job execution records before deletion")
-                count_before = db.session.execute(
-                    db.text("SELECT COUNT(*) FROM job_execution WHERE job_metadata->>'application_id' = :app_id"),
-                    {'app_id': application_id}
-                ).scalar()
-
-                logger.info(f"ADMIN CLEANUP: Found {count_before} job execution records for application_id={application_id}")
-
+                # Start transaction for count and delete
                 with db.session.begin():
+                    logger.debug(f"ADMIN CLEANUP: Counting job execution records before deletion")
+                    count_before = db.session.execute(
+                        db.text("SELECT COUNT(*) FROM job_execution WHERE job_metadata->>'application_id' = :app_id"),
+                        {'app_id': application_id}
+                    ).scalar()
+
+                    logger.info(f"ADMIN CLEANUP: Found {count_before} job execution records for application_id={application_id}")
+
                     job_result = db.session.execute(
                         db.text("DELETE FROM job_execution WHERE job_metadata->>'application_id' = :app_id"),
                         {'app_id': application_id}
