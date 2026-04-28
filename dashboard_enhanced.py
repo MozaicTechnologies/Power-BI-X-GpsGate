@@ -1095,29 +1095,18 @@ def cleanup_data():
 
         logger.info(f"ADMIN CLEANUP COMPLETED: Total deleted={total_deleted}, operations={len(operations)}, errors={len(errors)} for application_id={application_id}, table_type={table_type}")
 
-        # Reset customer_config fields (except token) to None
-        logger.info(f"ADMIN CLEANUP: Resetting customer_config for application_id={application_id}")
+        # Delete the customer_config record completely
+        logger.info(f"ADMIN CLEANUP: Deleting customer_config for application_id={application_id}")
         try:
             with db.session.begin():
                 customer = db.session.get(CustomerConfig, application_id)
                 if customer:
-                    # Reset all fields except application_id and token
-                    fields_to_reset = [
-                        'tag_name', 'trip_report_name', 'event_report_name',
-                        'speed_event_rule_name', 'idle_event_rule_name', 'awh_event_rule_name',
-                        'ha_event_rule_name', 'hb_event_rule_name', 'hc_event_rule_name',
-                        'wu_event_rule_name', 'wh_event_rule_name',
-                        'tag_id', 'trip_report_id', 'event_report_id',
-                        'speed_event_id', 'idle_event_id', 'awh_event_id',
-                        'ha_event_id', 'hb_event_id', 'hc_event_id', 'wu_event_id', 'wh_event_id'
-                    ]
-                    for field in fields_to_reset:
-                        setattr(customer, field, None)
-                    operations.append("Reset customer_config fields (except token) to None")
+                    db.session.delete(customer)
+                    operations.append("Deleted customer_config record")
                 else:
-                    operations.append("No customer_config found to reset")
+                    operations.append("No customer_config found to delete")
         except Exception as e:
-            errors.append(f"Failed to reset customer_config: {str(e)}")
+            errors.append(f"Failed to delete customer_config: {str(e)}")
 
         if errors:
             logger.error(f"ADMIN CLEANUP FAILED: {len(errors)} errors occurred")
