@@ -563,7 +563,6 @@ class DimVehicles(db.Model):
     application_id = db.Column(db.BigInteger, nullable=False, primary_key=True)
     name = db.Column(db.Text)
     username = db.Column(db.Text)
-    driver_id = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     device_name = db.Column(db.Text)
     imei = db.Column(db.Text)
