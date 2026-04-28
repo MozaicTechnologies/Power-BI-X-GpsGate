@@ -22,11 +22,11 @@ from application import create_app, db
 from config import Config
 from customer_runtime_config import EVENT_CONFIG, get_event_runtime_config, load_customers
 from data_pipeline import process_event_data
-from logger_config import get_logger
+from utils.logger import setup_logger
 from models import JobExecution
 
 
-logger = get_logger(__name__)
+logger = setup_logger(__name__)
 
 
 def process_event_with_dates(app, customer, event_type, start_date, end_date):

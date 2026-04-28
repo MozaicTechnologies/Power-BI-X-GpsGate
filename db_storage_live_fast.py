@@ -2,10 +2,10 @@ import pandas as pd
 from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.exc import ResourceClosedError
-import logging
+from utils.logger import setup_logger
 from models import db
 
-logger = logging.getLogger("DATA_PIPELINE")
+logger = setup_logger("DATA_PIPELINE")
 
 
 def _safe_int(v):
