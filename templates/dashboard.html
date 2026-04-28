@@ -33,49 +33,80 @@
 
                 <details style="margin-bottom: 15px;">
                     <summary style="cursor: pointer; font-weight: 600; color: #555;">Advanced Mapping Names</summary>
+                    <p style="margin: 10px 0; font-size: 0.85rem; color: #666;">
+                        Enter App ID and Token above, then click <strong>Load Options</strong> to populate the dropdowns from GpsGate.
+                    </p>
                     <div class="form-group" style="margin-top: 12px;">
-                        <label for="customer-tag-name">Tag Name</label>
-                        <input type="text" id="customer-tag-name" placeholder="e.g. Show on Map">
+                        <button type="button" onclick="loadMappingOptions()" style="background: linear-gradient(135deg, #28a745 0%, #218838 100%);">
+                            🔍 Load Options
+                        </button>
+                    </div>
+                    <div id="mapping-options-message" class="message"></div>
+                    <div class="form-group" style="margin-top: 12px;">
+                        <label for="customer-tag-name">Tag</label>
+                        <select id="customer-tag-name" data-options-source="tags">
+                            <option value="">Load options first</option>
+                        </select>
                     </div>
                     <div class="form-group">
-                        <label for="customer-trip-report-name">Trip Report Name</label>
-                        <input type="text" id="customer-trip-report-name" placeholder="e.g. Trip & Idle Power BI Format">
+                        <label for="customer-trip-report-name">Trip Report</label>
+                        <select id="customer-trip-report-name" data-options-source="reports">
+                            <option value="">Load options first</option>
+                        </select>
                     </div>
                     <div class="form-group">
-                        <label for="customer-event-report-name">Event Report Name</label>
-                        <input type="text" id="customer-event-report-name" placeholder="e.g. Event Rule detailed (Tag)">
+                        <label for="customer-event-report-name">Event Report</label>
+                        <select id="customer-event-report-name" data-options-source="reports">
+                            <option value="">Load options first</option>
+                        </select>
                     </div>
                     <div class="form-group">
-                        <label for="customer-speed-event-rule-name">Speed Event Rule Name</label>
-                        <input type="text" id="customer-speed-event-rule-name" placeholder="e.g. Over Speeding +150km/h">
+                        <label for="customer-speed-event-rule-name">Speed Event Rule</label>
+                        <select id="customer-speed-event-rule-name" data-options-source="event_rules">
+                            <option value="">Load options first</option>
+                        </select>
                     </div>
                     <div class="form-group">
-                        <label for="customer-idle-event-rule-name">Idle Event Rule Name</label>
-                        <input type="text" id="customer-idle-event-rule-name" placeholder="e.g. 30 min idle">
+                        <label for="customer-idle-event-rule-name">Idle Event Rule</label>
+                        <select id="customer-idle-event-rule-name" data-options-source="event_rules">
+                            <option value="">Load options first</option>
+                        </select>
                     </div>
                     <div class="form-group">
-                        <label for="customer-awh-event-rule-name">AWH Event Rule Name</label>
-                        <input type="text" id="customer-awh-event-rule-name" placeholder="e.g. After Working Hours Usage">
+                        <label for="customer-awh-event-rule-name">AWH Event Rule</label>
+                        <select id="customer-awh-event-rule-name" data-options-source="event_rules">
+                            <option value="">Load options first</option>
+                        </select>
                     </div>
                     <div class="form-group">
-                        <label for="customer-ha-event-rule-name">HA Event Rule Name</label>
-                        <input type="text" id="customer-ha-event-rule-name" placeholder="e.g. Harsh Acceleration">
+                        <label for="customer-ha-event-rule-name">HA Event Rule</label>
+                        <select id="customer-ha-event-rule-name" data-options-source="event_rules">
+                            <option value="">Load options first</option>
+                        </select>
                     </div>
                     <div class="form-group">
-                        <label for="customer-hb-event-rule-name">HB Event Rule Name</label>
-                        <input type="text" id="customer-hb-event-rule-name" placeholder="e.g. Harsh Braking">
+                        <label for="customer-hb-event-rule-name">HB Event Rule</label>
+                        <select id="customer-hb-event-rule-name" data-options-source="event_rules">
+                            <option value="">Load options first</option>
+                        </select>
                     </div>
                     <div class="form-group">
-                        <label for="customer-hc-event-rule-name">HC Event Rule Name</label>
-                        <input type="text" id="customer-hc-event-rule-name" placeholder="e.g. Harsh Cornering">
+                        <label for="customer-hc-event-rule-name">HC Event Rule</label>
+                        <select id="customer-hc-event-rule-name" data-options-source="event_rules">
+                            <option value="">Load options first</option>
+                        </select>
                     </div>
                     <div class="form-group">
-                        <label for="customer-wu-event-rule-name">WU Event Rule Name</label>
-                        <input type="text" id="customer-wu-event-rule-name" placeholder="e.g. Weekend Usage">
+                        <label for="customer-wu-event-rule-name">WU Event Rule</label>
+                        <select id="customer-wu-event-rule-name" data-options-source="event_rules">
+                            <option value="">Load options first</option>
+                        </select>
                     </div>
                     <div class="form-group">
-                        <label for="customer-wh-event-rule-name">WH Event Rule Name</label>
-                        <input type="text" id="customer-wh-event-rule-name" placeholder="e.g. Working Hours Usage">
+                        <label for="customer-wh-event-rule-name">WH Event Rule</label>
+                        <select id="customer-wh-event-rule-name" data-options-source="event_rules">
+                            <option value="">Load options first</option>
+                        </select>
                     </div>
                 </details>
                 
@@ -281,6 +312,7 @@
         </div>
     </div>
 
+    <script src="{{ url_for('static', filename='js/customer-config.js') }}"></script>
     <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
     <script src="{{ url_for('static', filename='js/cleanup.js') }}"></script>
 </body>

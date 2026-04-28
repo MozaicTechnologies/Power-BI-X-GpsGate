@@ -30,44 +30,6 @@ function getSelectedApplicationId() {
     return document.getElementById('manual-application-id').value.trim();
 }
 
-function collectCustomerConfigPayload() {
-    return {
-        application_id: document.getElementById('customer-app-id').value.trim(),
-        token: document.getElementById('customer-token').value.trim(),
-        tag_name: document.getElementById('customer-tag-name').value.trim(),
-        trip_report_name: document.getElementById('customer-trip-report-name').value.trim(),
-        event_report_name: document.getElementById('customer-event-report-name').value.trim(),
-        speed_event_rule_name: document.getElementById('customer-speed-event-rule-name').value.trim(),
-        idle_event_rule_name: document.getElementById('customer-idle-event-rule-name').value.trim(),
-        awh_event_rule_name: document.getElementById('customer-awh-event-rule-name').value.trim(),
-        ha_event_rule_name: document.getElementById('customer-ha-event-rule-name').value.trim(),
-        hb_event_rule_name: document.getElementById('customer-hb-event-rule-name').value.trim(),
-        hc_event_rule_name: document.getElementById('customer-hc-event-rule-name').value.trim(),
-        wu_event_rule_name: document.getElementById('customer-wu-event-rule-name').value.trim(),
-        wh_event_rule_name: document.getElementById('customer-wh-event-rule-name').value.trim()
-    };
-}
-
-function clearCustomerConfigForm() {
-    [
-        'customer-app-id',
-        'customer-token',
-        'customer-tag-name',
-        'customer-trip-report-name',
-        'customer-event-report-name',
-        'customer-speed-event-rule-name',
-        'customer-idle-event-rule-name',
-        'customer-awh-event-rule-name',
-        'customer-ha-event-rule-name',
-        'customer-hb-event-rule-name',
-        'customer-hc-event-rule-name',
-        'customer-wu-event-rule-name',
-        'customer-wh-event-rule-name'
-    ].forEach(id => {
-        document.getElementById(id).value = '';
-    });
-}
-
         async function refreshCustomerConfigs() {
             try {
                 const response = await fetch('/dashboard/customer-config');

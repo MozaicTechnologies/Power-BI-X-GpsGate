@@ -5,6 +5,7 @@ Provides live status monitoring and manual job execution
 
 from flask import Blueprint, render_template, jsonify, request
 from datetime import datetime, timedelta
+from urllib.parse import urljoin
 import traceback
 import threading
 import json
@@ -29,7 +30,7 @@ from models import (
     DimDrivers,
     DimVehicleCustomFields,
 )
-from customer_runtime_config import EVENT_CONFIG, get_event_runtime_config, load_customers
+from customer_runtime_config import EVENT_CONFIG, get_event_runtime_config, load_customers, normalize_token
 from data_pipeline import process_event_data
 from utils.logger import setup_logger
 from config import Config
@@ -91,6 +92,8 @@ NAME_TO_ID_FIELD_MAP = {
     "wu_event_rule_name": "wu_event_id",
     "wh_event_rule_name": "wh_event_id",
 }
+
+ID_FIELDS = tuple(NAME_TO_ID_FIELD_MAP.values())
 
 
 def get_dashboard_customer(application_id: str | None = None) -> CustomerConfig:
@@ -479,6 +482,11 @@ def save_customer_config():
             for field_name in NAME_TO_ID_FIELD_MAP
             if field_name in data
         }
+        id_fields = {
+            field_name: str(data.get(field_name, '')).strip() or None
+            for field_name in ID_FIELDS
+            if field_name in data
+        }
 
         if not application_id or not token:
             return jsonify({
@@ -501,22 +509,89 @@ def save_customer_config():
                 changed_name_fields.append(field_name)
                 setattr(customer, field_name, new_value)
 
+        for id_field, new_id in id_fields.items():
+            setattr(customer, id_field, new_id)
+
         for field_name in changed_name_fields:
-            setattr(customer, NAME_TO_ID_FIELD_MAP[field_name], None)
+            id_field = NAME_TO_ID_FIELD_MAP[field_name]
+            if id_field not in id_fields:
+                setattr(customer, id_field, None)
 
         db.session.commit()
 
+        has_unfilled_ids = any(
+            field_name in name_fields
+            and name_fields[field_name]
+            and not getattr(customer, NAME_TO_ID_FIELD_MAP[field_name])
+            for field_name in NAME_TO_ID_FIELD_MAP
+        )
+        message = f"Customer config {'created' if created else 'updated'} for application_id={application_id}."
+        if has_unfilled_ids:
+            message += " Run Dimension Sync to populate missing report, tag, and event IDs."
+
         return jsonify({
             'success': True,
-            'message': (
-                f"Customer config {'created' if created else 'updated'} for application_id={application_id}. "
-                "Run Dimension Sync to populate report, tag, and event IDs."
-            ),
+            'message': message,
             'customer': serialize_customer_config(customer)
         }), 201 if created else 200
     except Exception as e:
         db.session.rollback()
         logger.error(f"Failed to save customer_config: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@dashboard_bp.route('/customer-config/options', methods=['POST'])
+def fetch_customer_config_options():
+    """Fetch tags, reports, and event rules from GpsGate API for dropdown selection."""
+    try:
+        data = request.get_json() or {}
+        application_id = str(data.get('application_id', '')).strip()
+        token = str(data.get('token', '')).strip()
+
+        if not application_id or not token:
+            return jsonify({
+                'success': False,
+                'error': 'application_id and token are required'
+            }), 400
+
+        auth_token = normalize_token(token)
+        base = Config.BASE_URL if Config.BASE_URL.endswith('/') else Config.BASE_URL + '/'
+        headers = {'Authorization': auth_token}
+
+        endpoints = {
+            'tags': f"comGpsGate/api/v.1/applications/{application_id}/tags",
+            'event_rules': f"comGpsGate/api/v.1/applications/{application_id}/eventrules",
+            'reports': f"comGpsGate/api/v.1/applications/{application_id}/reports",
+        }
+
+        results = {}
+        for key, path in endpoints.items():
+            url = urljoin(base, path)
+            resp = requests.get(url, headers=headers, timeout=30)
+            if not resp.ok:
+                return jsonify({
+                    'success': False,
+                    'error': f"GpsGate {key} request failed: {resp.status_code} {resp.text[:200]}"
+                }), 502
+            items = resp.json() or []
+            results[key] = sorted(
+                [
+                    {'id': str(item.get('id')), 'name': (item.get('name') or '').strip()}
+                    for item in items
+                    if item.get('id') is not None
+                ],
+                key=lambda r: r['name'].lower(),
+            )
+
+        return jsonify({
+            'success': True,
+            **results,
+        })
+    except Exception as e:
+        logger.error(f"Failed to fetch customer config options: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)
