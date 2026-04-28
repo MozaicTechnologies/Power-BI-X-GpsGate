@@ -345,8 +345,8 @@ class DimVehicles(db.Model):
     imei = db.Column(db.Text)
     latitude = db.Column(db.Float)
     longitude = db.Column(db.Float)
-    utc = db.Column(db.DateTime)
-    validity = db.Column(db.Boolean)
+    last_utc = db.Column(db.DateTime)
+    valid = db.Column(db.Boolean)
 
 
 class DimDrivers(db.Model):

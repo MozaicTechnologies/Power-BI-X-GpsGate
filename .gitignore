@@ -81,6 +81,7 @@ test_*.py
 *_test.py
 debug_*.py
 *_debug.py
+test/**
 
 # Unused/Legacy Scripts
 fetch.py
