@@ -101,3 +101,31 @@ function clearCustomerConfigForm() {
         select.innerHTML = '<option value="">Load options first</option>';
     });
 }
+
+async function loadEligibleApplications() {
+    const select = document.getElementById('customer-app-id');
+    const previousValue = select.value;
+    try {
+        const response = await fetch('/dashboard/eligible-applications');
+        const data = await response.json();
+        if (!data.success) {
+            select.innerHTML = `<option value="">Failed: ${escapeHtml(data.error || 'unknown error')}</option>`;
+            return;
+        }
+        const items = data.applications || [];
+        if (!items.length) {
+            select.innerHTML = '<option value="">No eligible applications</option>';
+            return;
+        }
+        select.innerHTML = '<option value="">-- Select application --</option>' + items.map(item =>
+            `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} (${escapeHtml(item.id)})</option>`
+        ).join('');
+        if (previousValue && items.some(item => String(item.id) === String(previousValue))) {
+            select.value = previousValue;
+        }
+    } catch (error) {
+        select.innerHTML = `<option value="">Failed: ${escapeHtml(error.message)}</option>`;
+    }
+}
+
+loadEligibleApplications();

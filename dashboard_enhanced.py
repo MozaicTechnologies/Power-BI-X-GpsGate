@@ -543,6 +543,43 @@ def save_customer_config():
         }), 500
 
 
+@dashboard_bp.route('/eligible-applications', methods=['GET'])
+def list_eligible_applications():
+    """Fetch eligible applications from GpsGate using the admin token (env TOKEN_ADMIN)."""
+    try:
+        admin_token = (os.getenv('TOKEN_ADMIN') or '').strip()
+        if not admin_token:
+            return jsonify({
+                'success': False,
+                'error': 'TOKEN_ADMIN env var is not set'
+            }), 500
+
+        auth_token = normalize_token(admin_token)
+        base = Config.BASE_URL if Config.BASE_URL.endswith('/') else Config.BASE_URL + '/'
+        url = urljoin(base, 'comGpsGate/api/v.1/eligibleapplications')
+
+        resp = requests.get(url, headers={'Authorization': auth_token}, timeout=30)
+        if not resp.ok:
+            return jsonify({
+                'success': False,
+                'error': f"GpsGate eligibleapplications failed: {resp.status_code} {resp.text[:200]}"
+            }), 502
+
+        items = resp.json() or []
+        applications = sorted(
+            [
+                {'id': str(app.get('id')), 'name': (app.get('name') or '').strip()}
+                for app in items
+                if app.get('id') is not None
+            ],
+            key=lambda r: r['name'].lower(),
+        )
+        return jsonify({'success': True, 'applications': applications})
+    except Exception as e:
+        logger.error(f"Failed to list eligible applications: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @dashboard_bp.route('/customer-config/options', methods=['POST'])
 def fetch_customer_config_options():
     """Fetch tags, reports, and event rules from GpsGate API for dropdown selection."""
