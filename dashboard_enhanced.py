@@ -1020,12 +1020,23 @@ def cleanup_data():
                     logger.debug(f"ADMIN CLEANUP: Processing {model_class.__tablename__}")
 
                     with db.session.begin():
+                        # Use raw SQL to avoid model column mismatches
+                        from sqlalchemy import text
+
                         # Count records before deletion
-                        count_before = model_class.query.filter_by(application_id=application_id_int).count()
+                        count_result = db.session.execute(
+                            text(f"SELECT COUNT(*) FROM {model_class.__tablename__} WHERE application_id = :app_id"),
+                            {'app_id': application_id_int}
+                        )
+                        count_before = count_result.scalar()
                         logger.info(f"ADMIN CLEANUP: Found {count_before} records in {display_name} for application_id={application_id}")
 
                         # Delete records
-                        deleted = model_class.query.filter_by(application_id=application_id_int).delete()
+                        delete_result = db.session.execute(
+                            text(f"DELETE FROM {model_class.__tablename__} WHERE application_id = :app_id"),
+                            {'app_id': application_id_int}
+                        )
+                        deleted = delete_result.rowcount
                         total_deleted += deleted
 
                         logger.info(f"ADMIN CLEANUP: Deleted {deleted} records from {display_name} (application_id={application_id})")
