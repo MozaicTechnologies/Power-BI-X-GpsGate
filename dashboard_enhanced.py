@@ -935,6 +935,15 @@ def cleanup_data():
                 'error': 'table_type and application_id are required'
             }), 400
 
+        # Validate and convert application_id to int for dimension tables
+        try:
+            application_id_int = int(application_id)
+        except ValueError:
+            return jsonify({
+                'success': False,
+                'error': 'application_id must be a valid integer'
+            }), 400
+
         # Validate table type
         if table_type not in ['fact', 'dimension', 'both']:
             logger.warning(f"ADMIN CLEANUP FAILED: Invalid table_type={table_type}")
@@ -1012,11 +1021,11 @@ def cleanup_data():
 
                     with db.session.begin():
                         # Count records before deletion
-                        count_before = model_class.query.filter_by(application_id=application_id).count()
+                        count_before = model_class.query.filter_by(application_id=application_id_int).count()
                         logger.info(f"ADMIN CLEANUP: Found {count_before} records in {display_name} for application_id={application_id}")
 
                         # Delete records
-                        deleted = model_class.query.filter_by(application_id=application_id).delete()
+                        deleted = model_class.query.filter_by(application_id=application_id_int).delete()
                         total_deleted += deleted
 
                         logger.info(f"ADMIN CLEANUP: Deleted {deleted} records from {display_name} (application_id={application_id})")

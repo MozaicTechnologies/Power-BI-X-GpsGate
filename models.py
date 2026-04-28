@@ -600,7 +600,6 @@ class DimVehicleCustomFields(db.Model):
     field_value = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     application_id = db.Column(db.Integer, nullable=False, primary_key=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     __table_args__ = (
         db.UniqueConstraint("application_id", "vehicle_id", "field_name", name="uq_dim_vehicle_custom_fields"),
