@@ -48,12 +48,11 @@ function getSelectedApplicationId() {
                     cleanupSelect.innerHTML = '<option value="">Select customer</option>';
                     return;
                 }
-                select.innerHTML = '<option value="">Select customer</option>' + data.customers.map(customer => `
-                    <option value="${customer.application_id}">App ${customer.application_id}</option>
+                const optionsHtml = data.customers.map(customer => `
+                    <option value="${customer.application_id}">${getApplicationLabel(customer.application_id)}</option>
                 `).join('');
-                cleanupSelect.innerHTML = '<option value="">Select customer</option>' + data.customers.map(customer => `
-                    <option value="${customer.application_id}">App ${customer.application_id}</option>
-                `).join('');
+                select.innerHTML = '<option value="">Select customer</option>' + optionsHtml;
+                cleanupSelect.innerHTML = '<option value="">Select customer</option>' + optionsHtml;
                 if (currentSelection && data.customers.some(customer => customer.application_id === currentSelection)) {
                     select.value = currentSelection;
                 } else {
@@ -62,7 +61,7 @@ function getSelectedApplicationId() {
                 list.innerHTML = data.customers.map(customer => `
                     <div class="job-item" style="padding: 10px; margin-bottom: 8px;">
                         <div class="job-header">
-                            <span class="job-type">App ${customer.application_id}</span>
+                            <span class="job-type">${getApplicationLabel(customer.application_id)}</span>
                         </div>
                         <div class="job-details">
                             Token: ${customer.token}<br>

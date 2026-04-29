@@ -102,6 +102,17 @@ function clearCustomerConfigForm() {
     });
 }
 
+const applicationNamesById = {};
+
+function getApplicationName(applicationId) {
+    return applicationNamesById[String(applicationId)] || '';
+}
+
+function getApplicationLabel(applicationId) {
+    const name = getApplicationName(applicationId);
+    return name ? `${name} (${applicationId})` : `App ${applicationId}`;
+}
+
 async function loadEligibleApplications() {
     const select = document.getElementById('customer-app-id');
     const previousValue = select.value;
@@ -113,6 +124,9 @@ async function loadEligibleApplications() {
             return;
         }
         const items = data.applications || [];
+        items.forEach(item => {
+            applicationNamesById[String(item.id)] = item.name;
+        });
         if (!items.length) {
             select.innerHTML = '<option value="">No eligible applications</option>';
             return;
@@ -122,6 +136,9 @@ async function loadEligibleApplications() {
         ).join('');
         if (previousValue && items.some(item => String(item.id) === String(previousValue))) {
             select.value = previousValue;
+        }
+        if (typeof refreshCustomerConfigs === 'function') {
+            refreshCustomerConfigs();
         }
     } catch (error) {
         select.innerHTML = `<option value="">Failed: ${escapeHtml(error.message)}</option>`;
