@@ -5,6 +5,7 @@ from flask import Flask
 from models import db
 from config import Config
 from flask_migrate import Migrate
+from auth import login_manager, limiter
 
 def create_app():
     app = Flask(__name__)
@@ -12,7 +13,15 @@ def create_app():
     app.json.sort_keys = False
     app.json.allow_nan = False
     app.config.from_object(Config)
+
+    # Secure session cookies
+    app.config['SESSION_COOKIE_HTTPONLY'] = True
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+    app.config['SESSION_COOKIE_SECURE'] = not app.debug
+
     db.init_app(app)
+    login_manager.init_app(app)
+    limiter.init_app(app)
 
     ## with app.app_context():
     ##    db.create_all()
@@ -20,6 +29,10 @@ def create_app():
 
     Migrate(app, db, render_as_batch=True)
     
+    # Register auth blueprint
+    from auth import auth_bp
+    app.register_blueprint(auth_bp)
+
     # Register render and result blueprints
     from render import render_bp
     from result import result_bp

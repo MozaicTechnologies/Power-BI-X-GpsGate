@@ -4,6 +4,7 @@ Provides live status monitoring and manual job execution
 """
 
 from flask import Blueprint, render_template, jsonify, request
+from flask_login import login_required
 from datetime import datetime, timedelta
 from urllib.parse import urljoin
 import traceback
@@ -450,6 +451,7 @@ def execute_full_backfill_job(job_id, start_date, end_date, application_id=None)
 # ------------------------------------------------------------------
 
 @dashboard_bp.route('/customer-config', methods=['GET'])
+@login_required
 def list_customer_config():
     """List current customer_config rows with masked tokens."""
     try:
@@ -471,6 +473,7 @@ def list_customer_config():
 
 
 @dashboard_bp.route('/customer-config', methods=['POST'])
+@login_required
 def save_customer_config():
     """Create or update customer_config with application_id and token."""
     try:
@@ -544,6 +547,7 @@ def save_customer_config():
 
 
 @dashboard_bp.route('/eligible-applications', methods=['GET'])
+@login_required
 def list_eligible_applications():
     """Fetch eligible applications from GpsGate using the admin token (env TOKEN_ADMIN)."""
     try:
@@ -581,6 +585,7 @@ def list_eligible_applications():
 
 
 @dashboard_bp.route('/customer-config/options', methods=['POST'])
+@login_required
 def fetch_customer_config_options():
     """Fetch tags, reports, and event rules from GpsGate API for dropdown selection."""
     try:
@@ -636,6 +641,7 @@ def fetch_customer_config_options():
 
 
 @dashboard_bp.route('/trigger/dimension-sync', methods=['POST'])
+@login_required
 def trigger_dimension_sync():
     """Trigger manual dimension sync"""
     try:
@@ -679,6 +685,7 @@ def trigger_dimension_sync():
 
 
 @dashboard_bp.route('/trigger/fact-sync', methods=['POST'])
+@login_required
 def trigger_fact_sync():
     """Trigger manual fact table sync"""
     try:
@@ -742,6 +749,7 @@ def trigger_fact_sync():
 
 
 @dashboard_bp.route('/trigger/full-backfill', methods=['POST'])
+@login_required
 def trigger_full_backfill():
     """Trigger manual full backfill (dimensions + facts)"""
     try:
@@ -805,6 +813,7 @@ def trigger_full_backfill():
 
 
 @dashboard_bp.route('/status/<int:job_id>', methods=['GET'])
+@login_required
 def get_job_status(job_id):
     """Get status of a specific job"""
     try:
@@ -830,6 +839,7 @@ def get_job_status(job_id):
 
 
 @dashboard_bp.route('/status/recent', methods=['GET'])
+@login_required
 def get_recent_jobs():
     """Get recent job executions"""
     try:
@@ -853,6 +863,7 @@ def get_recent_jobs():
 
 
 @dashboard_bp.route('/stats/table-counts', methods=['GET'])
+@login_required
 def get_table_counts():
     """Get record counts for all fact and dimension tables (using raw SQL for accuracy)"""
     try:
@@ -914,6 +925,7 @@ def get_table_counts():
 
 
 @dashboard_bp.route('/stats/last-sync', methods=['GET'])
+@login_required
 def get_last_sync_stats():
     """Get last successful sync statistics"""
     try:
@@ -944,6 +956,7 @@ def get_last_sync_stats():
 
 
 @dashboard_bp.route('/stats/scheduler-status', methods=['GET'])
+@login_required
 def get_scheduler_status():
     """Get recent scheduled job executions (daily_sync and weekly_backfill)"""
     try:
@@ -979,6 +992,7 @@ def get_scheduler_status():
 
 
 @dashboard_bp.route('/ip-info', methods=['GET'])
+@login_required
 def get_ip_info():
     """Get server's outbound IP address for whitelisting purposes"""
     import requests as req
@@ -1021,6 +1035,7 @@ def get_ip_info():
 
 
 @dashboard_bp.route('/cleanup', methods=['POST'])
+@login_required
 def cleanup_data():
     """Clean up (delete) data for a specific customer - DANGEROUS OPERATION"""
     try:
@@ -1246,6 +1261,7 @@ def cleanup_data():
 
 
 @dashboard_bp.route('/', methods=['GET'])
+@login_required
 def dashboard_page():
     """Main dashboard HTML page"""
     return render_template('dashboard.html')
@@ -1253,6 +1269,7 @@ def dashboard_page():
 
 
 @dashboard_bp.route('/health/gpsgate-server', methods=['GET'])
+@login_required
 def check_gpsgate_server_health():
     """Quick health check for GpsGate server state"""
     try:
