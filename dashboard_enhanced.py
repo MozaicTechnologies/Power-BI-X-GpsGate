@@ -1042,18 +1042,8 @@ def cleanup_data():
         data = request.get_json() or {}
         table_type = data.get('table_type')
         application_id = str(data.get('application_id', '')).strip()
-        api_key = data.get('api_key')
 
-        logger.info(f"ADMIN CLEANUP REQUEST: table_type={table_type}, application_id={application_id}, api_key_provided={'Yes' if api_key else 'No'}")
-
-        # Validate API key (should be set as environment variable)
-        expected_key = os.getenv('ADMIN_CLEANUP_KEY', 'demo-admin-key-2026')  # Demo key for development
-        if api_key != expected_key:
-            logger.warning(f"ADMIN CLEANUP FAILED: Invalid API key for application_id={application_id}")
-            return jsonify({
-                'success': False,
-                'error': 'Invalid admin API key'
-            }), 403
+        logger.info(f"ADMIN CLEANUP REQUEST: table_type={table_type}, application_id={application_id}")
 
         if not table_type or not application_id:
             logger.warning(f"ADMIN CLEANUP FAILED: Missing required parameters - table_type={table_type}, application_id={application_id}")

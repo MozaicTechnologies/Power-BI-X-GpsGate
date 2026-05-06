@@ -12,9 +12,8 @@ function closeCleanupModal() {
 async function confirmCleanup() {
     const tableType = document.getElementById('cleanup-table-type').value;
     const applicationId = document.getElementById('cleanup-application-id').value;
-    const apiKey = document.getElementById('cleanup-api-key').value;
 
-    if (!tableType || !applicationId || !apiKey) {
+    if (!tableType || !applicationId) {
         showCleanupMessage('error', 'Please fill in all fields');
         return;
     }
@@ -29,8 +28,7 @@ async function confirmCleanup() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 table_type: tableType,
-                application_id: applicationId,
-                api_key: apiKey
+                application_id: applicationId
             })
         });
         const data = await response.json();
