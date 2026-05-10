@@ -1,11 +1,12 @@
 from dotenv import load_dotenv
-load_dotenv()  # Load .env file first
+load_dotenv()
 
 from flask import Flask
-from models import db
-from config import Config
+from .models import db
+from .config import Config
 from flask_migrate import Migrate
-from auth import login_manager, limiter
+from .routes.auth import login_manager, limiter
+
 
 def create_app():
     app = Flask(__name__)
@@ -14,7 +15,6 @@ def create_app():
     app.json.allow_nan = False
     app.config.from_object(Config)
 
-    # Secure session cookies
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
     app.config['SESSION_COOKIE_SECURE'] = not app.debug
@@ -23,36 +23,28 @@ def create_app():
     login_manager.init_app(app)
     limiter.init_app(app)
 
-    ## with app.app_context():
-    ##    db.create_all()
-    import models
+    import app.models
 
     Migrate(app, db, render_as_batch=True)
-    
-    # Register auth blueprint
-    from auth import auth_bp
+
+    from .routes.auth import auth_bp
     app.register_blueprint(auth_bp)
 
-    # Register render and result blueprints
-    from render import render_bp
-    from result import result_bp
+    from .routes.render import render_bp
+    from .routes.result import result_bp
     app.register_blueprint(render_bp)
     app.register_blueprint(result_bp)
-    
-    # Register backfill scheduler API
-    from backfill_scheduler import backfill_api
+
+    from .routes.backfill import backfill_api
     app.register_blueprint(backfill_api)
-    
-    # Register manual backfill/fetch API
-    from api import api_bp
+
+    from .routes.api import api_bp
     app.register_blueprint(api_bp)
-    
-    # Register enhanced dashboard with manual triggers
-    from dashboard_enhanced import dashboard_bp
+
+    from .routes.dashboard import dashboard_bp
     app.register_blueprint(dashboard_bp)
-    
-    # Register data pipeline blueprint
-    from data_pipeline import pipeline_bp
+
+    from .routes.pipeline import pipeline_bp
     app.register_blueprint(pipeline_bp)
-    
+
     return app
