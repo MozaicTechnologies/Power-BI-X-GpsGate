@@ -15,10 +15,10 @@ import numpy as np
 import time as pytime
 import os
 import io
-from utils.logger import setup_logger
+from app.utils.logger import setup_logger
 
-from models import db, Render, Result
-from db_storage import store_event_data_to_db
+from app.models import db, Render, Result
+from app.services.db_storage import store_event_data_to_db
 
 logger = setup_logger("DATA_PIPELINE")
 

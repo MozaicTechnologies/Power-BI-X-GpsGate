@@ -17,7 +17,8 @@ from datetime import date, timedelta
 # CONFIG
 # --------------------------------------------------
 
-BACKFILL_SCRIPT = "backfill_2025_week1.py"
+import os
+BACKFILL_SCRIPT = os.path.join(os.path.dirname(__file__), "backfill_2025_week1.py")
 
 START_DATE = date(2026, 1, 8)
 # TODAY = date.today()

@@ -12,7 +12,7 @@ import threading
 import json
 import requests
 import os
-from models import (
+from app.models import (
     db,
     CustomerConfig,
     JobExecution,
@@ -31,10 +31,10 @@ from models import (
     DimDrivers,
     DimVehicleCustomFields,
 )
-from customer_runtime_config import EVENT_CONFIG, get_event_runtime_config, load_customers, normalize_token
-from data_pipeline import process_event_data
-from utils.logger import setup_logger
-from config import Config
+from app.services.customer_config import EVENT_CONFIG, get_event_runtime_config, load_customers, normalize_token
+from app.routes.pipeline import process_event_data
+from app.utils.logger import setup_logger
+from app.config import Config
 
 logger = setup_logger(__name__)
 
@@ -183,14 +183,14 @@ def iter_week_ranges(start_date: str, end_date: str):
 
 def execute_dimension_sync_job(job_id, application_id=None):
     """Execute dimension sync in background"""
-    from application import create_app
+    from app import create_app
     app = create_app()
-    
+
     with app.app_context():
         job = db.session.get(JobExecution, job_id)
         try:
             # Import dimension sync function
-            from sync_dimensions_from_api import main as sync_dimension_main
+            from app.services.sync_dimensions import main as sync_dimension_main
             
             logger.info(f"🚀 Starting dimension sync job {job_id}")
             total_records = sync_dimension_main(application_id)  # Now returns record count
@@ -221,7 +221,7 @@ def execute_dimension_sync_job(job_id, application_id=None):
 
 def execute_fact_sync_job(job_id, start_date, end_date, application_id=None):
     """Execute fact table sync in background"""
-    from application import create_app
+    from app import create_app
     app = create_app()
     
     with app.app_context():
@@ -334,16 +334,16 @@ def execute_fact_sync_job(job_id, start_date, end_date, application_id=None):
 
 def execute_full_backfill_job(job_id, start_date, end_date, application_id=None):
     """Execute full backfill (dimensions + facts) in background"""
-    from application import create_app
+    from app import create_app
     app = create_app()
-    
+
     with app.app_context():
         job = db.session.get(JobExecution, job_id)
         try:
             logger.info(f"🚀 Starting full backfill job {job_id}: {start_date} to {end_date}")
-            
+
             # Step 1: Sync dimensions
-            from sync_dimensions_from_api import main as sync_dimension_main
+            from app.services.sync_dimensions import main as sync_dimension_main
             sync_dimension_main(application_id)
             logger.info(f"✅ Dimensions synced from API")
             

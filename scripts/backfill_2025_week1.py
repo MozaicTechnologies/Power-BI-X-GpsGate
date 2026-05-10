@@ -20,9 +20,10 @@ print("[BACKFILL] Starting customer-config backfill", flush=True)
 print(f"[BACKFILL] Python: {sys.version}", flush=True)
 
 load_dotenv()
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from application import create_app
-from data_pipeline import process_event_data
+from app import create_app
+from app.routes.pipeline import process_event_data
 
 
 app = create_app()
@@ -65,7 +66,7 @@ def normalize_token(token: str | None) -> str:
 
 
 def load_customers(app_id_filter: str | None = None):
-    from models import CustomerConfig
+    from app.models import CustomerConfig
 
     query = CustomerConfig.query
     if app_id_filter:

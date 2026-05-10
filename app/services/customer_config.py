@@ -41,7 +41,7 @@ def normalize_token(token: str | None) -> str:
 
 
 def load_customers(app_id_filter: str | None = None):
-    from models import CustomerConfig
+    from app.models import CustomerConfig
 
     query = CustomerConfig.query
     if app_id_filter:

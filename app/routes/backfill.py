@@ -23,7 +23,7 @@ def health():
 def test():
     """Test endpoint - simple response"""
     try:
-        from application import create_app, db
+        from app import create_app, db
         app = create_app()
         with app.app_context():
             return jsonify({
@@ -42,7 +42,7 @@ def test():
 def init_db():
     """Initialize database schema - run migrations and create tables"""
     try:
-        from application import db, create_app
+        from app import db, create_app
         import os
         
         app = create_app()
@@ -119,8 +119,8 @@ def backfill_current_week():
             return jsonify({'error': 'Unauthorized - invalid API key'}), 401
         
         try:
-            from application import create_app, db
-            from backfill_helper import backfill_current_week
+            from app import create_app, db
+            from app.services.backfill_helper import backfill_current_week
             
             app = create_app()
             with app.app_context():
@@ -147,8 +147,8 @@ def backfill_current_week():
 def backfill_status():
     """Get status of last backfill"""
     try:
-        from application import db, create_app
-        from models import FactTrip, FactSpeeding, FactIdle, FactAWH, FactWH, FactHA, FactHB, FactWU
+        from app import db, create_app
+        from app.models import FactTrip, FactSpeeding, FactIdle, FactAWH, FactWH, FactHA, FactHB, FactWU
         
         # Ensure we're in app context
         app = create_app()

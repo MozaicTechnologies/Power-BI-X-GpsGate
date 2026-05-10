@@ -16,14 +16,14 @@ print(f"[WEEKLY_BACKFILL] Working directory: {os.getcwd()}")
 print(f"[WEEKLY_BACKFILL] Script path: {os.path.abspath(__file__)}")
 
 load_dotenv()
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from application import create_app, db
-from config import Config
-from customer_runtime_config import EVENT_CONFIG, get_event_runtime_config, load_customers
-from data_pipeline import process_event_data
-from utils.logger import setup_logger
-from models import JobExecution
+from app import create_app, db
+from app.config import Config
+from app.services.customer_config import EVENT_CONFIG, get_event_runtime_config, load_customers
+from app.routes.pipeline import process_event_data
+from app.utils.logger import setup_logger
+from app.models import JobExecution
 
 
 logger = setup_logger(__name__)

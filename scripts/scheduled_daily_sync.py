@@ -16,14 +16,14 @@ print(f"[DAILY_SYNC] Working directory: {os.getcwd()}")
 print(f"[DAILY_SYNC] Script path: {os.path.abspath(__file__)}")
 
 load_dotenv()
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from application import create_app, db
-from config import Config
-from customer_runtime_config import EVENT_CONFIG, get_event_runtime_config, load_customers
-from data_pipeline import process_event_data
-from utils.logger import setup_logger
-from models import JobExecution
+from app import create_app, db
+from app.config import Config
+from app.services.customer_config import EVENT_CONFIG, get_event_runtime_config, load_customers
+from app.routes.pipeline import process_event_data
+from app.utils.logger import setup_logger
+from app.models import JobExecution
 
 
 logger = setup_logger(__name__)
@@ -82,7 +82,7 @@ def run_daily_sync():
 
             logger.info("Syncing dimension tables")
             try:
-                from sync_dimensions_from_api import main as sync_dimensions
+                from app.services.sync_dimensions import main as sync_dimensions
 
                 dimension_result = sync_dimensions()
                 dimension_records = dimension_result if isinstance(dimension_result, int) else 0

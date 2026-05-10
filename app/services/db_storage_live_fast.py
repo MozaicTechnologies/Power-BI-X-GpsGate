@@ -2,8 +2,8 @@ import pandas as pd
 from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.exc import ResourceClosedError
-from utils.logger import setup_logger
-from models import db
+from app.utils.logger import setup_logger
+from app.models import db
 
 logger = setup_logger("DATA_PIPELINE")
 
