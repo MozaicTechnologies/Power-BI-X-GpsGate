@@ -27,6 +27,10 @@ class Config:
     print(f"[CONFIG] Using PostgreSQL: {raw_url[:50]}...")
     
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_POOL_SIZE = 10       # base connections kept open
+    SQLALCHEMY_MAX_OVERFLOW = 10    # extra connections allowed under load
+    SQLALCHEMY_POOL_TIMEOUT = 30    # seconds to wait for a connection
+    SQLALCHEMY_POOL_RECYCLE = 300   # recycle idle connections every 5 min
     
     # GpsGate API settings
     TOKEN = os.getenv("TOKEN")

@@ -15,23 +15,6 @@ api_bp = Blueprint('api', __name__, url_prefix='/api')
 # Track backfill operations
 backfill_operations = {}
 
-def log_operation(operation_id, message):
-    """Log operation messages to both stderr and a file."""
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    log_msg = f"[{timestamp}] [{operation_id}] {message}"
-    
-    # Write to stderr so it appears in Render logs
-    print(log_msg, file=sys.stderr, flush=True)
-    print(log_msg, flush=True)  # Also stdout
-    
-    # Write to file as backup
-    try:
-        log_file = os.path.join(os.path.dirname(__file__), 'operations.log')
-        with open(log_file, 'a') as f:
-            f.write(log_msg + '\n')
-    except:
-        pass
-
 
 @api_bp.route('/backfill', methods=['POST'])
 def manual_backfill():

@@ -6,6 +6,7 @@ import sys
 import json
 import traceback
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from dotenv import load_dotenv
 
@@ -94,37 +95,34 @@ def run_weekly_backfill():
 
             for customer in customers:
                 app_results = {}
-                for event_type in event_types:
-                    logger.info(f"Processing app={customer.application_id} event={event_type}")
-                    try:
-                        result = process_event_with_dates(
-                            app=app,
-                            customer=customer,
-                            event_type=event_type,
-                            start_date=start_str,
-                            end_date=end_str,
-                        )
-                        raw = result.get("raw", 0)
-                        inserted = result.get("inserted", 0)
-                        skipped = result.get("skipped", 0)
-                        failed = result.get("failed", 0)
 
-                        app_results[event_type] = {
-                            "status": "success",
-                            "raw": raw,
-                            "inserted": inserted,
-                            "skipped": skipped,
-                            "failed": failed,
-                        }
-
-                        total_raw += raw
-                        total_inserted += inserted
-                        total_skipped += skipped
-                        total_failed += failed
-                    except Exception as exc:
-                        logger.error(f"app={customer.application_id} {event_type} failed: {exc}")
-                        app_results[event_type] = {"status": "failed", "error": str(exc)}
-                        total_failed += 1
+                with ThreadPoolExecutor(max_workers=4) as pool:
+                    futures = {
+                        pool.submit(
+                            process_event_with_dates,
+                            app, customer, et, start_str, end_str
+                        ): et
+                        for et in event_types
+                    }
+                    for future in as_completed(futures):
+                        et = futures[future]
+                        try:
+                            result = future.result()
+                            app_results[et] = {
+                                "status": "success",
+                                "raw":      result.get("raw", 0),
+                                "inserted": result.get("inserted", 0),
+                                "skipped":  result.get("skipped", 0),
+                                "failed":   result.get("failed", 0),
+                            }
+                            total_raw      += result.get("raw", 0)
+                            total_inserted += result.get("inserted", 0)
+                            total_skipped  += result.get("skipped", 0)
+                            total_failed   += result.get("failed", 0)
+                        except Exception as exc:
+                            logger.error(f"app={customer.application_id} {et} failed: {exc}")
+                            app_results[et] = {"status": "failed", "error": str(exc)}
+                            total_failed += 1
 
                 results[str(customer.application_id)] = app_results
 

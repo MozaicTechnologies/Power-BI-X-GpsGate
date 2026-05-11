@@ -10,6 +10,7 @@ from urllib.parse import urljoin
 import traceback
 import threading
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 import os
 from app.models import (
@@ -241,25 +242,29 @@ def execute_fact_sync_job(job_id, start_date, end_date, application_id=None):
 
             for week_start, week_end in week_ranges:
                 week_key = f"{week_start} -> {week_end}"
-                results[week_key] = {}
-                for event_type in event_types:
-                    try:
-                        logger.info(f"Processing {event_type} for {week_key}")
-                        result = process_event_with_dates(
-                            app=app,
-                            event_type=event_type,
-                            start_date=week_start,
-                            end_date=week_end,
-                            customer=customer
-                        )
-                        results[week_key][event_type] = result
-                        total_inserted += result.get('inserted', 0)
-                        total_skipped += result.get('skipped', 0)
-                        total_failed += result.get('failed', 0)
-                    except Exception as e:
-                        logger.error(f"Fact sync failed for {event_type} {week_key}: {str(e)}")
-                        results[week_key][event_type] = {'status': 'failed', 'error': str(e)}
-                        total_failed += 1
+                week_results = {}
+
+                with ThreadPoolExecutor(max_workers=4) as pool:
+                    futures = {
+                        pool.submit(
+                            process_event_with_dates, app, et, week_start, week_end, customer
+                        ): et
+                        for et in event_types
+                    }
+                    for future in as_completed(futures):
+                        et = futures[future]
+                        try:
+                            result = future.result()
+                            week_results[et] = result
+                            total_inserted += result.get('inserted', 0)
+                            total_skipped  += result.get('skipped', 0)
+                            total_failed   += result.get('failed', 0)
+                        except Exception as e:
+                            logger.error(f"Fact sync failed for {et} {week_key}: {e}")
+                            week_results[et] = {'status': 'failed', 'error': str(e)}
+                            total_failed += 1
+
+                results[week_key] = week_results
 
             job.status = 'completed'
             job.completed_at = datetime.utcnow()
@@ -280,45 +285,6 @@ def execute_fact_sync_job(job_id, start_date, end_date, application_id=None):
                 f"Fact sync completed: {total_inserted} inserted, "
                 f"{total_skipped} skipped, {total_failed} failed"
             )
-            return
-            
-            results = {}
-            total_inserted = 0
-            total_failed = 0
-            
-            for event_type in event_types:
-                try:
-                    logger.info(f"Processing {event_type} for {start_date} to {end_date}")
-                    result = process_event_with_dates(
-                        app=app,
-                        event_type=event_type,
-                        start_date=start_date,
-                        end_date=end_date,
-                        customer=customer
-                    )
-                    results[event_type] = result
-                    total_inserted += result.get('inserted', 0)
-                    total_failed += result.get('failed', 0)
-                    logger.info(f"✅ {event_type}: {result.get('inserted', 0)} inserted, {result.get('failed', 0)} failed")
-                except Exception as e:
-                    logger.error(f"❌ {event_type} failed: {str(e)}")
-                    results[event_type] = {'status': 'failed', 'error': str(e)}
-                    total_failed += 1
-            
-            job.status = 'completed'
-            job.completed_at = datetime.utcnow()
-            job.records_processed = total_inserted
-            job.errors = total_failed
-            job.job_metadata = {
-                'results': results, 
-                'start_date': start_date, 
-                'end_date': end_date,
-                'total_events_processed': len(event_types),
-                'application_id': str(customer.application_id)
-            }
-            db.session.commit()
-            
-            logger.info(f"✅ Fact sync completed: {total_inserted} inserted, {total_failed} failed")
             
         except Exception as e:
             logger.error(f"❌ Fact sync failed: {str(e)}")
@@ -359,24 +325,29 @@ def execute_full_backfill_job(job_id, start_date, end_date, application_id=None)
 
             for week_start, week_end in week_ranges:
                 week_key = f"{week_start} -> {week_end}"
-                results[week_key] = {}
-                for event_type in event_types:
-                    try:
-                        result = process_event_with_dates(
-                            app=app,
-                            event_type=event_type,
-                            start_date=week_start,
-                            end_date=week_end,
-                            customer=customer
-                        )
-                        results[week_key][event_type] = result
-                        total_inserted += result.get('inserted', 0)
-                        total_skipped += result.get('skipped', 0)
-                        total_failed += result.get('failed', 0)
-                    except Exception as e:
-                        logger.error(f"Full backfill failed for {event_type} {week_key}: {str(e)}")
-                        results[week_key][event_type] = {'status': 'failed', 'error': str(e)}
-                        total_failed += 1
+                week_results = {}
+
+                with ThreadPoolExecutor(max_workers=4) as pool:
+                    futures = {
+                        pool.submit(
+                            process_event_with_dates, app, et, week_start, week_end, customer
+                        ): et
+                        for et in event_types
+                    }
+                    for future in as_completed(futures):
+                        et = futures[future]
+                        try:
+                            result = future.result()
+                            week_results[et] = result
+                            total_inserted += result.get('inserted', 0)
+                            total_skipped  += result.get('skipped', 0)
+                            total_failed   += result.get('failed', 0)
+                        except Exception as e:
+                            logger.error(f"Full backfill failed for {et} {week_key}: {e}")
+                            week_results[et] = {'status': 'failed', 'error': str(e)}
+                            total_failed += 1
+
+                results[week_key] = week_results
 
             job.status = 'completed'
             job.completed_at = datetime.utcnow()
@@ -397,42 +368,6 @@ def execute_full_backfill_job(job_id, start_date, end_date, application_id=None)
                 f"Full backfill completed: {total_inserted} inserted, "
                 f"{total_skipped} skipped, {total_failed} failed"
             )
-            return
-
-            results = {}
-            total_inserted = 0
-            total_failed = 0
-            
-            for event_type in event_types:
-                try:
-                    result = process_event_with_dates(
-                        app=app,
-                        event_type=event_type,
-                        start_date=start_date,
-                        end_date=end_date,
-                        customer=customer
-                    )
-                    results[event_type] = result
-                    total_inserted += result.get('inserted', 0)
-                    total_failed += result.get('failed', 0)
-                except Exception as e:
-                    logger.error(f"❌ {event_type} failed: {str(e)}")
-                    results[event_type] = {'status': 'failed', 'error': str(e)}
-            
-            job.status = 'completed'
-            job.completed_at = datetime.utcnow()
-            job.records_processed = total_inserted
-            job.errors = total_failed
-            job.job_metadata = {
-                'dimensions': 'synced from GpsGate API',
-                'facts': results,
-                'start_date': start_date,
-                'end_date': end_date,
-                'application_id': str(customer.application_id)
-            }
-            db.session.commit()
-            
-            logger.info(f"✅ Full backfill completed: {total_inserted} inserted, {total_failed} failed")
             
         except Exception as e:
             logger.error(f"❌ Full backfill failed: {str(e)}")
