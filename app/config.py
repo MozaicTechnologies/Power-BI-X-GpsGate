@@ -1,5 +1,6 @@
 
 import os
+from celery.schedules import crontab
 
 class Config:
     # Get SECRET_KEY from environment, fallback to default
@@ -31,6 +32,31 @@ class Config:
     SQLALCHEMY_MAX_OVERFLOW = 10    # extra connections allowed under load
     SQLALCHEMY_POOL_TIMEOUT = 30    # seconds to wait for a connection
     SQLALCHEMY_POOL_RECYCLE = 300   # recycle idle connections every 5 min
+
+    # ------------------------------------------------------------------
+    # Celery
+    # ------------------------------------------------------------------
+    CELERY = {
+        "broker_url":            os.getenv("CELERY_BROKER_URL",    "redis://localhost:6379/0"),
+        "result_backend":        os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0"),
+        "task_serializer":       "json",
+        "result_serializer":     "json",
+        "accept_content":        ["json"],
+        "result_expires":        86400,   # keep results 24 h
+        "task_track_started":    True,
+        "task_send_sent_event":  True,
+        "worker_send_task_events": True,
+        "beat_schedule": {
+            "daily-sync": {
+                "task":     "tasks.daily_sync",
+                "schedule": crontab(hour=2, minute=0),
+            },
+            "weekly-backfill": {
+                "task":     "tasks.weekly_backfill",
+                "schedule": crontab(hour=3, minute=0, day_of_week=1),
+            },
+        },
+    }
     
     # GpsGate API settings
     TOKEN = os.getenv("TOKEN")

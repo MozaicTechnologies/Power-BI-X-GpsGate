@@ -4,6 +4,7 @@ load_dotenv()
 from flask import Flask
 from .models import db
 from .config import Config
+from .celery_app import configure_celery
 from flask_migrate import Migrate
 from .routes.auth import login_manager, limiter
 
@@ -22,6 +23,7 @@ def create_app():
     db.init_app(app)
     login_manager.init_app(app)
     limiter.init_app(app)
+    configure_celery(app)
 
     import app.models
 

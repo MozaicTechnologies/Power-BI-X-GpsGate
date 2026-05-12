@@ -8,9 +8,6 @@ from flask_login import login_required
 from datetime import datetime, timedelta
 from urllib.parse import urljoin
 import traceback
-import threading
-import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 import os
 from app.models import (
@@ -32,18 +29,13 @@ from app.models import (
     DimDrivers,
     DimVehicleCustomFields,
 )
-from app.services.customer_config import EVENT_CONFIG, get_event_runtime_config, load_customers, normalize_token
-from app.routes.pipeline import process_event_data
+from app.services.customer_config import get_event_runtime_config, load_customers, normalize_token
 from app.utils.logger import setup_logger
 from app.config import Config
 
 logger = setup_logger(__name__)
 
 dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/dashboard')
-
-# Store active job threads
-active_jobs = {}
-
 
 def mask_token(token: str | None) -> str:
     token = (token or "").strip()
@@ -114,272 +106,6 @@ def get_dashboard_customer(application_id: str | None = None) -> CustomerConfig:
         f"Dashboard/manual trigger defaulted to application_id={customer.application_id} because no customer was specified"
     )
     return customer
-
-def process_event_with_dates(app, event_type, start_date, end_date, customer=None):
-    """
-    Helper function to process event data for a specific date range.
-    Creates Flask request context with proper payload.
-    """
-    if event_type not in EVENT_CONFIG:
-        raise ValueError(f"Unknown event type: {event_type}")
-    
-    if customer is None:
-        customer = get_dashboard_customer()
-
-    runtime = get_event_runtime_config(customer, event_type, Config.BASE_URL)
-    
-    # Prepare payload matching process_event_data signature (MATCHES backfill_2025_week1.py)
-    payload = {
-        "app_id": runtime.app_id,
-        "token": runtime.token,
-        "base_url": runtime.base_url,
-        "report_id": runtime.report_id,
-        "tag_id": runtime.tag_id,
-        "period_start": f"{start_date}T00:00:00Z",
-        "period_end": f"{end_date}T23:59:59Z"
-    }
-    
-    if runtime.event_id:
-        payload["event_id"] = runtime.event_id
-    
-    # Call process_event_data within Flask request context
-    with app.test_request_context(
-        '/api/process',
-        method='POST',
-        data=json.dumps(payload),
-        content_type='application/json'
-    ):
-        # process_event_data returns (jsonify(...), status_code) tuple
-        response_tuple = process_event_data(
-            event_name=event_type,
-            response_key=runtime.response_key
-        )
-        
-        # Extract the response object and JSON data
-        if isinstance(response_tuple, tuple):
-            response_obj, status_code = response_tuple
-            # Get JSON data from response object
-            data = response_obj.get_json()
-            # Return the accounting/totals data
-            return data.get('accounting', {})
-        else:
-            # In case it's not a tuple (shouldn't happen, but safe fallback)
-            return response_tuple
-
-
-def iter_week_ranges(start_date: str, end_date: str):
-    """Yield inclusive 7-day windows between start_date and end_date."""
-    current = datetime.strptime(start_date, "%Y-%m-%d").date()
-    final = datetime.strptime(end_date, "%Y-%m-%d").date()
-
-    while current <= final:
-        week_end = min(current + timedelta(days=6), final)
-        yield current.strftime("%Y-%m-%d"), week_end.strftime("%Y-%m-%d")
-        current = week_end + timedelta(days=1)
-
-
-# ------------------------------------------------------------------
-# MANUAL JOB EXECUTORS (Run in background threads)
-# ------------------------------------------------------------------
-
-def execute_dimension_sync_job(job_id, application_id=None):
-    """Execute dimension sync in background"""
-    from app import create_app
-    app = create_app()
-
-    with app.app_context():
-        job = db.session.get(JobExecution, job_id)
-        try:
-            # Import dimension sync function
-            from app.services.sync_dimensions import main as sync_dimension_main
-            
-            logger.info(f"🚀 Starting dimension sync job {job_id}")
-            total_records = sync_dimension_main(application_id)  # Now returns record count
-            
-            job.status = 'completed'
-            job.completed_at = datetime.utcnow()
-            job.records_processed = total_records
-            job.job_metadata = {
-                'message': f'Dimension sync completed - {total_records:,} records processed',
-                'total_records': total_records,
-                'application_id': str(application_id) if application_id else None,
-            }
-            db.session.commit()
-            
-            logger.info(f"✅ Dimension sync completed: {total_records:,} records processed")
-            
-        except Exception as e:
-            logger.error(f"❌ Dimension sync failed: {str(e)}")
-            job.status = 'failed'
-            job.completed_at = datetime.utcnow()
-            job.error_message = str(e)
-            job.job_metadata = {'traceback': traceback.format_exc()}
-            db.session.commit()
-        finally:
-            if job_id in active_jobs:
-                del active_jobs[job_id]
-
-
-def execute_fact_sync_job(job_id, start_date, end_date, application_id=None):
-    """Execute fact table sync in background"""
-    from app import create_app
-    app = create_app()
-    
-    with app.app_context():
-        job = db.session.get(JobExecution, job_id)
-        try:
-            logger.info(f"🚀 Starting fact sync job {job_id}: {start_date} to {end_date}")
-            
-            # Process all event types (server state issue resolved)
-            event_types = list(EVENT_CONFIG.keys())
-            customer = get_dashboard_customer(application_id)
-
-            week_ranges = list(iter_week_ranges(start_date, end_date))
-            results = {}
-            total_inserted = 0
-            total_skipped = 0
-            total_failed = 0
-
-            for week_start, week_end in week_ranges:
-                week_key = f"{week_start} -> {week_end}"
-                week_results = {}
-
-                with ThreadPoolExecutor(max_workers=1) as pool:
-                    futures = {
-                        pool.submit(
-                            process_event_with_dates, app, et, week_start, week_end, customer
-                        ): et
-                        for et in event_types
-                    }
-                    for future in as_completed(futures):
-                        et = futures[future]
-                        try:
-                            result = future.result()
-                            week_results[et] = result
-                            total_inserted += result.get('inserted', 0)
-                            total_skipped  += result.get('skipped', 0)
-                            total_failed   += result.get('failed', 0)
-                        except Exception as e:
-                            logger.error(f"Fact sync failed for {et} {week_key}: {e}")
-                            week_results[et] = {'status': 'failed', 'error': str(e)}
-                            total_failed += 1
-
-                results[week_key] = week_results
-
-            job.status = 'completed'
-            job.completed_at = datetime.utcnow()
-            job.records_processed = total_inserted
-            job.errors = total_failed
-            job.job_metadata = {
-                'results': results,
-                'start_date': start_date,
-                'end_date': end_date,
-                'total_events_processed': len(event_types),
-                'application_id': str(customer.application_id),
-                'weeks_processed': len(week_ranges),
-                'total_skipped': total_skipped,
-            }
-            db.session.commit()
-
-            logger.info(
-                f"Fact sync completed: {total_inserted} inserted, "
-                f"{total_skipped} skipped, {total_failed} failed"
-            )
-            
-        except Exception as e:
-            logger.error(f"❌ Fact sync failed: {str(e)}")
-            job.status = 'failed'
-            job.completed_at = datetime.utcnow()
-            job.error_message = str(e)
-            job.job_metadata = {'traceback': traceback.format_exc()}
-            db.session.commit()
-        finally:
-            if job_id in active_jobs:
-                del active_jobs[job_id]
-
-
-def execute_full_backfill_job(job_id, start_date, end_date, application_id=None):
-    """Execute full backfill (dimensions + facts) in background"""
-    from app import create_app
-    app = create_app()
-
-    with app.app_context():
-        job = db.session.get(JobExecution, job_id)
-        try:
-            logger.info(f"🚀 Starting full backfill job {job_id}: {start_date} to {end_date}")
-
-            # Step 1: Sync dimensions
-            from app.services.sync_dimensions import main as sync_dimension_main
-            sync_dimension_main(application_id)
-            logger.info(f"✅ Dimensions synced from API")
-            
-            # Step 2: Sync facts
-            event_types = ['Trip', 'Speeding', 'Idle', 'AWH', 'WH', 'HA', 'HB', 'WU']
-            customer = get_dashboard_customer(application_id)
-
-            week_ranges = list(iter_week_ranges(start_date, end_date))
-            results = {}
-            total_inserted = 0
-            total_skipped = 0
-            total_failed = 0
-
-            for week_start, week_end in week_ranges:
-                week_key = f"{week_start} -> {week_end}"
-                week_results = {}
-
-                with ThreadPoolExecutor(max_workers=1) as pool:
-                    futures = {
-                        pool.submit(
-                            process_event_with_dates, app, et, week_start, week_end, customer
-                        ): et
-                        for et in event_types
-                    }
-                    for future in as_completed(futures):
-                        et = futures[future]
-                        try:
-                            result = future.result()
-                            week_results[et] = result
-                            total_inserted += result.get('inserted', 0)
-                            total_skipped  += result.get('skipped', 0)
-                            total_failed   += result.get('failed', 0)
-                        except Exception as e:
-                            logger.error(f"Full backfill failed for {et} {week_key}: {e}")
-                            week_results[et] = {'status': 'failed', 'error': str(e)}
-                            total_failed += 1
-
-                results[week_key] = week_results
-
-            job.status = 'completed'
-            job.completed_at = datetime.utcnow()
-            job.records_processed = total_inserted
-            job.errors = total_failed
-            job.job_metadata = {
-                'dimensions': 'synced from GpsGate API',
-                'facts': results,
-                'start_date': start_date,
-                'end_date': end_date,
-                'application_id': str(customer.application_id),
-                'weeks_processed': len(week_ranges),
-                'total_skipped': total_skipped,
-            }
-            db.session.commit()
-
-            logger.info(
-                f"Full backfill completed: {total_inserted} inserted, "
-                f"{total_skipped} skipped, {total_failed} failed"
-            )
-            
-        except Exception as e:
-            logger.error(f"❌ Full backfill failed: {str(e)}")
-            job.status = 'failed'
-            job.completed_at = datetime.utcnow()
-            job.error_message = str(e)
-            job.job_metadata = {'traceback': traceback.format_exc()}
-            db.session.commit()
-        finally:
-            if job_id in active_jobs:
-                del active_jobs[job_id]
-
 
 # ------------------------------------------------------------------
 # API ENDPOINTS
@@ -578,223 +304,99 @@ def fetch_customer_config_options():
 @dashboard_bp.route('/trigger/dimension-sync', methods=['POST'])
 @login_required
 def trigger_dimension_sync():
-    """Trigger manual dimension sync"""
     try:
+        from app.tasks.sync_tasks import dimension_sync_task
         data = request.get_json() or {}
         application_id = str(data.get('application_id', '')).strip() or None
-
-        # Create job execution record
-        job = JobExecution(
-            job_type='manual_dimension_sync',
-            status='running',
-            started_at=datetime.utcnow(),
-            triggered_by='manual',
-            job_metadata={'application_id': application_id}
-        )
-        db.session.add(job)
-        db.session.commit()
-        
-        # Start background thread
-        thread = threading.Thread(target=execute_dimension_sync_job, args=(job.id, application_id))
-        thread.daemon = True
-        thread.start()
-        
-        active_jobs[job.id] = thread
-        
-        return jsonify({
-            'success': True,
-            'job_id': job.id,
-            'message': (
-                f"Dimension sync started for application_id={application_id}"
-                if application_id else
-                'Dimension sync started'
-            )
-        }), 202
-        
+        task = dimension_sync_task.delay(application_id)
+        return jsonify({'success': True, 'task_id': task.id}), 202
     except Exception as e:
-        logger.error(f"Failed to trigger dimension sync: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        logger.error(f"trigger_dimension_sync failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @dashboard_bp.route('/trigger/fact-sync', methods=['POST'])
 @login_required
 def trigger_fact_sync():
-    """Trigger manual fact table sync"""
     try:
+        from app.tasks.backfill_tasks import fact_sync_task
         data = request.get_json() or {}
         start_date = data.get('start_date')
         end_date = data.get('end_date')
         application_id = str(data.get('application_id', '')).strip() or None
-        
         if not start_date or not end_date:
-            return jsonify({
-                'success': False,
-                'error': 'start_date and end_date are required'
-            }), 400
-        
-        # Validate date format
+            return jsonify({'success': False, 'error': 'start_date and end_date are required'}), 400
         datetime.strptime(start_date, '%Y-%m-%d')
         datetime.strptime(end_date, '%Y-%m-%d')
-        
-        # Create job execution record
-        job = JobExecution(
-            job_type='manual_fact_sync',
-            status='running',
-            started_at=datetime.utcnow(),
-            triggered_by='manual',
-            job_metadata={'start_date': start_date, 'end_date': end_date, 'application_id': application_id}
-        )
-        db.session.add(job)
-        db.session.commit()
-        
-        # Start background thread
-        thread = threading.Thread(
-            target=execute_fact_sync_job,
-            args=(job.id, start_date, end_date, application_id)
-        )
-        thread.daemon = True
-        thread.start()
-        
-        active_jobs[job.id] = thread
-        
-        return jsonify({
-            'success': True,
-            'job_id': job.id,
-            'message': (
-                f'Fact sync started for application_id={application_id} from {start_date} to {end_date}'
-                if application_id else
-                f'Fact sync started for {start_date} to {end_date}'
-            )
-        }), 202
-        
-    except ValueError as e:
-        return jsonify({
-            'success': False,
-            'error': 'Invalid date format. Use YYYY-MM-DD'
-        }), 400
+        task = fact_sync_task.delay(start_date, end_date, application_id)
+        return jsonify({'success': True, 'task_id': task.id}), 202
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
     except Exception as e:
-        logger.error(f"Failed to trigger fact sync: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        logger.error(f"trigger_fact_sync failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @dashboard_bp.route('/trigger/full-backfill', methods=['POST'])
 @login_required
 def trigger_full_backfill():
-    """Trigger manual full backfill (dimensions + facts)"""
     try:
+        from app.tasks.backfill_tasks import full_backfill_task
         data = request.get_json() or {}
         start_date = data.get('start_date')
         end_date = data.get('end_date')
         application_id = str(data.get('application_id', '')).strip() or None
-        
         if not start_date or not end_date:
-            return jsonify({
-                'success': False,
-                'error': 'start_date and end_date are required'
-            }), 400
-        
-        # Validate date format
+            return jsonify({'success': False, 'error': 'start_date and end_date are required'}), 400
         datetime.strptime(start_date, '%Y-%m-%d')
         datetime.strptime(end_date, '%Y-%m-%d')
-        
-        # Create job execution record
-        job = JobExecution(
-            job_type='manual_full_backfill',
-            status='running',
-            started_at=datetime.utcnow(),
-            triggered_by='manual',
-            job_metadata={'start_date': start_date, 'end_date': end_date, 'application_id': application_id}
-        )
-        db.session.add(job)
-        db.session.commit()
-        
-        # Start background thread
-        thread = threading.Thread(
-            target=execute_full_backfill_job,
-            args=(job.id, start_date, end_date, application_id)
-        )
-        thread.daemon = True
-        thread.start()
-        
-        active_jobs[job.id] = thread
-        
-        return jsonify({
-            'success': True,
-            'job_id': job.id,
-            'message': (
-                f'Full backfill started for application_id={application_id} from {start_date} to {end_date}'
-                if application_id else
-                f'Full backfill started for {start_date} to {end_date}'
-            )
-        }), 202
-        
-    except ValueError as e:
-        return jsonify({
-            'success': False,
-            'error': 'Invalid date format. Use YYYY-MM-DD'
-        }), 400
+        task = full_backfill_task.delay(start_date, end_date, application_id)
+        return jsonify({'success': True, 'task_id': task.id}), 202
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
     except Exception as e:
-        logger.error(f"Failed to trigger full backfill: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        logger.error(f"trigger_full_backfill failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@dashboard_bp.route('/status/<int:job_id>', methods=['GET'])
+@dashboard_bp.route('/task-status/<task_id>', methods=['GET'])
 @login_required
-def get_job_status(job_id):
-    """Get status of a specific job"""
-    try:
-        job = db.session.get(JobExecution, job_id)
-        
-        if not job:
-            return jsonify({
-                'success': False,
-                'error': 'Job not found'
-            }), 404
-        
-        return jsonify({
-            'success': True,
-            'job': job.to_dict()
-        })
-        
-    except Exception as e:
-        logger.error(f"Failed to get job status: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+def get_task_status(task_id):
+    """Real-time Celery task status with progress percentage."""
+    from celery.result import AsyncResult
+    result = AsyncResult(task_id)
+
+    info = result.info
+    if isinstance(info, Exception):
+        info = {'error': str(info), 'type': type(info).__name__}
+    elif not isinstance(info, dict):
+        info = {}
+
+    percent = 100 if result.state in ('SUCCESS', 'FAILURE') else info.get('percent', 0)
+
+    return jsonify({
+        'task_id':  task_id,
+        'state':    result.state,
+        'percent':  percent,
+        'status':   info.get('status', result.state),
+        'info':     info,
+        'result':   result.result if result.state == 'SUCCESS' else None,
+    })
 
 
 @dashboard_bp.route('/status/recent', methods=['GET'])
 @login_required
 def get_recent_jobs():
-    """Get recent job executions"""
+    """Historical job list from DB (Flower has live view at /flower)."""
     try:
         limit = request.args.get('limit', 20, type=int)
-        
         jobs = JobExecution.query.order_by(
             JobExecution.started_at.desc()
         ).limit(limit).all()
-        
-        return jsonify({
-            'success': True,
-            'jobs': [job.to_dict() for job in jobs]
-        })
-        
+        return jsonify({'success': True, 'jobs': [job.to_dict() for job in jobs]})
     except Exception as e:
-        logger.error(f"Failed to get recent jobs: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        logger.error(f"get_recent_jobs failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @dashboard_bp.route('/stats/table-counts', methods=['GET'])

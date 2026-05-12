@@ -1,0 +1,101 @@
+version: "3.9"
+
+# ---------------------------------------------------------------------------
+# Shared environment injected into every service that needs the app
+# ---------------------------------------------------------------------------
+x-app-env: &app-env
+  env_file: .env
+  environment:
+    DATABASE_URL:            postgresql+psycopg://gpsgate:gpsgate@db:5432/gpsgate_dev
+    CELERY_BROKER_URL:       redis://redis:6379/0
+    CELERY_RESULT_BACKEND:   redis://redis:6379/0
+
+x-app-build: &app-build
+  build: .
+  volumes:
+    - .:/app          # live-reload during dev
+
+# ---------------------------------------------------------------------------
+# Infrastructure
+# ---------------------------------------------------------------------------
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  db:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB:       gpsgate_dev
+      POSTGRES_USER:     gpsgate
+      POSTGRES_PASSWORD: gpsgate
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gpsgate -d gpsgate_dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+# ---------------------------------------------------------------------------
+# Application services
+# ---------------------------------------------------------------------------
+  web:
+    <<: [*app-build, *app-env]
+    command: gunicorn wsgi:app --bind 0.0.0.0:5000 --workers 2 --reload --timeout 120
+    ports:
+      - "5000:5000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    <<: [*app-build, *app-env]
+    command: celery -A celery_worker worker --loglevel=info --concurrency=2
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  beat:
+    <<: [*app-build, *app-env]
+    command: celery -A celery_worker beat --loglevel=info
+    volumes:
+      - .:/app
+      - beat_data:/app/celerybeat
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  flower:
+    <<: [*app-build, *app-env]
+    command: >
+      celery -A celery_worker flower
+        --port=5555
+        --basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-admin}
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+      - worker
+
+# ---------------------------------------------------------------------------
+# Volumes
+# ---------------------------------------------------------------------------
+volumes:
+  redis_data:
+  pg_data:
+  beat_data:
