@@ -106,7 +106,7 @@ def run_daily_sync():
             for customer in customers:
                 app_results = {}
 
-                with ThreadPoolExecutor(max_workers=4) as pool:
+                with ThreadPoolExecutor(max_workers=1) as pool:
                     futures = {
                         pool.submit(
                             process_event_with_dates,

@@ -244,7 +244,7 @@ def execute_fact_sync_job(job_id, start_date, end_date, application_id=None):
                 week_key = f"{week_start} -> {week_end}"
                 week_results = {}
 
-                with ThreadPoolExecutor(max_workers=4) as pool:
+                with ThreadPoolExecutor(max_workers=1) as pool:
                     futures = {
                         pool.submit(
                             process_event_with_dates, app, et, week_start, week_end, customer
@@ -327,7 +327,7 @@ def execute_full_backfill_job(job_id, start_date, end_date, application_id=None)
                 week_key = f"{week_start} -> {week_end}"
                 week_results = {}
 
-                with ThreadPoolExecutor(max_workers=4) as pool:
+                with ThreadPoolExecutor(max_workers=1) as pool:
                     futures = {
                         pool.submit(
                             process_event_with_dates, app, et, week_start, week_end, customer
