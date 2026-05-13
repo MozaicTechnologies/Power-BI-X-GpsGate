@@ -1,9 +1,14 @@
 # ---------------------------------------------------------------------------
 # Shared environment injected into every service that needs the app
 # ---------------------------------------------------------------------------
+x-tz: &tz
+  environment:
+    TZ: Asia/Muscat
+
 x-app-env: &app-env
   env_file: .env
   environment:
+    TZ:                      Asia/Muscat
     DATABASE_URL:            postgresql+psycopg://gpsgate:gpsgate@db:5432/gpsgate_dev
     CELERY_BROKER_URL:       redis://redis:6379/0
     CELERY_RESULT_BACKEND:   redis://redis:6379/0
@@ -25,7 +30,7 @@ x-logging: &logging
 # ---------------------------------------------------------------------------
 services:
   redis:
-    <<: *logging
+    <<: [*logging, *tz]
     image: redis:7-alpine
     ports:
       - "6379:6379"
@@ -43,6 +48,7 @@ services:
     ports:
       - "5432:5432"
     environment:
+      TZ:                Asia/Muscat
       POSTGRES_DB:       gpsgate_dev
       POSTGRES_USER:     gpsgate
       POSTGRES_PASSWORD: gpsgate
@@ -58,7 +64,7 @@ services:
 # Application services
 # ---------------------------------------------------------------------------
   nginx:
-    <<: *logging
+    <<: [*logging, *tz]
     image: nginx:alpine
     ports:
       - "80:80"
@@ -72,7 +78,7 @@ services:
     restart: unless-stopped
 
   certbot:
-    <<: *logging
+    <<: [*logging, *tz]
     image: certbot/certbot
     volumes:
       - ./certbot/conf:/etc/letsencrypt
