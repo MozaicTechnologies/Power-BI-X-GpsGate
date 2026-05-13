@@ -33,7 +33,7 @@ sleep 5
 
 # Get the real Let's Encrypt certificate
 echo "Requesting Let's Encrypt certificate for $DOMAIN..."
-docker compose run --rm --no-deps --entrypoint certbot certbot certonly \
+docker compose run --rm --no-deps --entrypoint certbot certonly \
     --webroot \
     --webroot-path=/var/www/certbot \
     --email "$EMAIL" \
