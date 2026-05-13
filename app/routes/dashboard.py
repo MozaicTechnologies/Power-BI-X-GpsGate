@@ -13,7 +13,6 @@ import os
 from app.models import (
     db,
     CustomerConfig,
-    JobExecution,
     FactTrip,
     FactSpeeding,
     FactIdle,
@@ -387,13 +386,34 @@ def get_task_status(task_id):
 @dashboard_bp.route('/status/recent', methods=['GET'])
 @login_required
 def get_recent_jobs():
-    """Historical job list from DB (Flower has live view at /flower)."""
+    """Live job status from Celery workers."""
     try:
-        limit = request.args.get('limit', 20, type=int)
-        jobs = JobExecution.query.order_by(
-            JobExecution.started_at.desc()
-        ).limit(limit).all()
-        return jsonify({'success': True, 'jobs': [job.to_dict() for job in jobs]})
+        from app.celery_app import celery
+        inspect = celery.control.inspect(timeout=3)
+        active   = inspect.active()   or {}
+        reserved = inspect.reserved() or {}
+
+        jobs = []
+        for worker, tasks in active.items():
+            for t in tasks:
+                jobs.append({
+                    'id':         t['id'],
+                    'job_type':   t['name'].replace('tasks.', ''),
+                    'status':     'running',
+                    'started_at': datetime.utcfromtimestamp(t['time_start']).isoformat() if t.get('time_start') else None,
+                    'worker':     worker,
+                })
+        for worker, tasks in reserved.items():
+            for t in tasks:
+                jobs.append({
+                    'id':         t['id'],
+                    'job_type':   t['name'].replace('tasks.', ''),
+                    'status':     'queued',
+                    'started_at': None,
+                    'worker':     worker,
+                })
+
+        return jsonify({'success': True, 'jobs': jobs})
     except Exception as e:
         logger.error(f"get_recent_jobs failed: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -464,68 +484,60 @@ def get_table_counts():
 @dashboard_bp.route('/stats/last-sync', methods=['GET'])
 @login_required
 def get_last_sync_stats():
-    """Get last successful sync statistics"""
+    """Get currently running sync tasks from Celery workers."""
     try:
-        # Get last completed daily sync
-        daily_sync = JobExecution.query.filter_by(
-            job_type='daily_sync',
-            status='completed'
-        ).order_by(JobExecution.completed_at.desc()).first()
-        
-        # Get last completed weekly backfill
-        weekly_backfill = JobExecution.query.filter_by(
-            job_type='weekly_backfill',
-            status='completed'
-        ).order_by(JobExecution.completed_at.desc()).first()
-        
-        return jsonify({
-            'success': True,
-            'daily_sync': daily_sync.to_dict() if daily_sync else None,
-            'weekly_backfill': weekly_backfill.to_dict() if weekly_backfill else None
-        })
-        
+        from app.celery_app import celery
+        inspect = celery.control.inspect(timeout=3)
+        active  = inspect.active() or {}
+
+        from datetime import timezone
+        running: dict[str, dict | None] = {'daily_sync': None, 'weekly_backfill': None}
+        for _, tasks in active.items():
+            for t in tasks:
+                name = t['name'].replace('tasks.', '')
+                if name in running:
+                    started = datetime.fromtimestamp(t['time_start'], tz=timezone.utc).isoformat() if t.get('time_start') else None
+                    running[name] = {'id': t['id'], 'job_type': name, 'status': 'running', 'started_at': started}
+
+        return jsonify({'success': True, 'daily_sync': running['daily_sync'], 'weekly_backfill': running['weekly_backfill']})
+
     except Exception as e:
         logger.error(f"Failed to get last sync stats: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @dashboard_bp.route('/stats/scheduler-status', methods=['GET'])
 @login_required
 def get_scheduler_status():
-    """Get recent scheduled job executions (daily_sync and weekly_backfill)"""
+    """Get active and scheduled Celery tasks for daily_sync and weekly_backfill."""
     try:
-        # Get last 10 daily syncs
-        daily_syncs = JobExecution.query.filter_by(
-            job_type='daily_sync'
-        ).order_by(JobExecution.started_at.desc()).limit(10).all()
-        
-        # Get last 10 weekly backfills
-        weekly_backfills = JobExecution.query.filter_by(
-            job_type='weekly_backfill'
-        ).order_by(JobExecution.started_at.desc()).limit(10).all()
-        
-        # Get any currently running scheduled jobs
-        running_jobs = JobExecution.query.filter(
-            JobExecution.job_type.in_(['daily_sync', 'weekly_backfill']),
-            JobExecution.status == 'running'
-        ).all()
-        
-        return jsonify({
-            'success': True,
-            'daily_syncs': [job.to_dict() for job in daily_syncs],
-            'weekly_backfills': [job.to_dict() for job in weekly_backfills],
-            'running_jobs': [job.to_dict() for job in running_jobs]
-        })
-        
+        from app.celery_app import celery
+        from datetime import timezone
+        inspect   = celery.control.inspect(timeout=3)
+        active    = inspect.active()    or {}
+        scheduled = inspect.scheduled() or {}
+
+        SCHEDULED_TASKS = {'tasks.daily_sync', 'tasks.weekly_backfill'}
+
+        running_jobs = []
+        for _, tasks in active.items():
+            for t in tasks:
+                if t['name'] in SCHEDULED_TASKS:
+                    started = datetime.fromtimestamp(t['time_start'], tz=timezone.utc).isoformat() if t.get('time_start') else None
+                    running_jobs.append({'id': t['id'], 'job_type': t['name'].replace('tasks.', ''), 'status': 'running', 'started_at': started})
+
+        scheduled_jobs = []
+        for _, tasks in scheduled.items():
+            for t in tasks:
+                req = t.get('request', {})
+                if req.get('name') in SCHEDULED_TASKS:
+                    scheduled_jobs.append({'id': req.get('id'), 'job_type': req.get('name', '').replace('tasks.', ''), 'status': 'scheduled', 'eta': t.get('eta')})
+
+        return jsonify({'success': True, 'running_jobs': running_jobs, 'scheduled_jobs': scheduled_jobs, 'daily_syncs': [], 'weekly_backfills': []})
+
     except Exception as e:
         logger.error(f"Failed to get scheduler status: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @dashboard_bp.route('/ip-info', methods=['GET'])
@@ -704,48 +716,6 @@ def cleanup_data():
                     logger.error(f"ADMIN CLEANUP ERROR in {model_class.__tablename__}: {str(e)}")
                     logger.error(f"ADMIN CLEANUP ERROR DETAILS: type={type(e).__name__}, args={e.args}")
                     errors.append(error_msg)
-
-        # Delete JobExecution records for this application
-        logger.debug("ADMIN CLEANUP: Processing job execution records")
-
-        # Special function for JobExecution with JSON field
-        def cleanup_job_execution():
-            try:
-                with db.session.begin():
-                    from sqlalchemy import text
-
-                    # Count records before deletion
-                    count_query = db.session.query(JobExecution).filter(
-                        text("job_metadata->>'application_id' = :app_id")
-                    ).params(app_id=application_id)
-
-                    count_before = count_query.count()
-                    logger.info(f"ADMIN CLEANUP: Found {count_before} job execution records for application_id={application_id}")
-
-                    # Delete records
-                    delete_query = db.session.query(JobExecution).filter(
-                        text("job_metadata->>'application_id' = :app_id")
-                    ).params(app_id=application_id)
-
-                    deleted = delete_query.delete()
-                    logger.info(f"ADMIN CLEANUP: Deleted {deleted} job execution records (application_id={application_id})")
-
-                    return deleted, None
-            except Exception as e:
-                error_msg = f"Failed to delete job execution records: {str(e)}"
-                logger.error(f"ADMIN CLEANUP ERROR in job_execution: {str(e)}")
-                logger.error(f"ADMIN CLEANUP ERROR DETAILS: type={type(e).__name__}, args={e.args}")
-                return 0, error_msg
-
-        deleted, error = cleanup_job_execution()
-        total_deleted += deleted
-
-        if error:
-            errors.append(error)
-        elif deleted > 0:
-            operations.append(f"Deleted {deleted} job execution records")
-        else:
-            operations.append("No job execution records found")
 
         logger.info(f"ADMIN CLEANUP COMPLETED: Total deleted={total_deleted}, operations={len(operations)}, errors={len(errors)} for application_id={application_id}, table_type={table_type}")
 

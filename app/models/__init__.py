@@ -10,7 +10,6 @@ from .models import (
     FactHA,
     FactHB,
     FactWU,
-    JobExecution,
     CustomerConfig,
     DimTags,
     DimEventRules,
