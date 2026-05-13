@@ -114,3 +114,5 @@ logs/
 # Database files
 *.db
 *.sqlite
+
+celerybeat-schedule
