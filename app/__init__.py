@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from flask import Flask
-from .models import db, init_db
+from .models import db
 from .config import Config
 from .celery_app import configure_celery
 from flask_migrate import Migrate
@@ -28,8 +28,6 @@ def create_app():
     from . import models  # noqa: F401
 
     Migrate(app, db, render_as_batch=True)
-
-    init_db(app)
 
     from .routes.auth import auth_bp
     app.register_blueprint(auth_bp)
