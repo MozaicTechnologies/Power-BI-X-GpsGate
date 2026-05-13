@@ -25,7 +25,7 @@ def create_app():
     limiter.init_app(app)
     configure_celery(app)
 
-    import app.models
+    from . import models  # noqa: F401
 
     Migrate(app, db, render_as_batch=True)
 
