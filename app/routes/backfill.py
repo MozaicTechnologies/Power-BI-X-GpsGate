@@ -100,48 +100,25 @@ def backfill_current_week():
         "stats_by_type": {...}
     }
     """
-    
-    # Wrap everything in try-catch to ensure JSON response
+   
     try:
-        # Optional: Validate API key (only if provided)
-        try:
-            api_key = request.args.get('api_key') or (request.get_json(silent=True).get('api_key') if request.is_json else None)
-        except:
-            api_key = None
-            
-        expected_key = os.environ.get('BACKFILL_API_KEY')
+        from app import create_app, db
+        from app.services.backfill_helper import backfill_current_week
         
-        # Only enforce authentication if:
-        # 1. A key is configured in the environment AND
-        # 2. A key was provided in the request AND
-        # 3. They don't match
-        if expected_key and api_key and api_key != expected_key:
-            return jsonify({'error': 'Unauthorized - invalid API key'}), 401
-        
-        try:
-            from app import create_app, db
-            from app.services.backfill_helper import backfill_current_week
-            
-            app = create_app()
-            with app.app_context():
-                result = backfill_current_week()
-                return jsonify(result), 200
-        
-        except Exception as main_error:
-            return jsonify({
-                'success': False,
-                'error': str(main_error)[:500],
-                'error_type': type(main_error).__name__,
-                'timestamp': datetime.now().isoformat()
-            }), 500
-            
-    except Exception as outer_error:
-        # Ultimate fallback - ensure we always return JSON
+        app = create_app()
+        with app.app_context():
+            result = backfill_current_week()
+            return jsonify(result), 200
+    
+    except Exception as main_error:
         return jsonify({
             'success': False,
-            'error': 'Unexpected error: ' + str(outer_error)[:300],
+            'error': str(main_error)[:500],
+            'error_type': type(main_error).__name__,
             'timestamp': datetime.now().isoformat()
         }), 500
+            
+  
 
 @backfill_api.route('/backfill/status', methods=['GET'])
 def backfill_status():

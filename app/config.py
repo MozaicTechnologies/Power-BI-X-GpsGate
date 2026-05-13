@@ -3,9 +3,7 @@ import os
 from celery.schedules import crontab
 
 class Config:
-    # Get SECRET_KEY from environment, fallback to default
-    SECRET_KEY = os.getenv("SECRET_KEY", "jjkhjhkjvkvjhvjfjcjvhkhgcfjgccg")
-    
+   
     # Get DATABASE_URL from environment (required)
     raw_url = os.getenv("DATABASE_URL")
     
@@ -61,15 +59,6 @@ class Config:
     # GpsGate API settings
     TOKEN = os.getenv("TOKEN")
     BASE_URL = os.getenv("BASE_URL", "https://omantracking2.com")
-    
-    # Google Drive settings from environment
-    GDRIVE_FOLDER_ID = os.environ.get("GDRIVE_FOLDER_ID")
-    GOOGLE_APPLICATION_CREDENTIALS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-    
-    # Debug info
-    print(f"[CONFIG] GDRIVE_FOLDER_ID: {GDRIVE_FOLDER_ID}")
-    print(f"[CONFIG] GOOGLE_APPLICATION_CREDENTIALS: {'Set' if GOOGLE_APPLICATION_CREDENTIALS else 'Not set'}")
-    print(f"[CONFIG] SECRET_KEY: {'Set' if SECRET_KEY else 'Using default'}")
     
     # Debug TOKEN (masked for security)
     if TOKEN:
