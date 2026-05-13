@@ -3,7 +3,9 @@ import os
 from celery.schedules import crontab
 
 class Config:
-   
+
+    SECRET_KEY = os.getenv("SECRET_KEY")
+
     # Get DATABASE_URL from environment (required)
     raw_url = os.getenv("DATABASE_URL")
     
