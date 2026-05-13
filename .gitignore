@@ -116,4 +116,4 @@ logs/
 *.sqlite
 
 celerybeat-schedule
-cerbot
+certbot
