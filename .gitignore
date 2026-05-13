@@ -116,5 +116,4 @@ logs/
 *.sqlite
 
 celerybeat-schedule
-fullchain.pem
-privkey.pem
+cerbot
