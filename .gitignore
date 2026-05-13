@@ -51,6 +51,8 @@ instance/
 
 # Environments
 .env
+!.env.example
+env
 .venv
 env/
 venv/
