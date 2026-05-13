@@ -31,20 +31,32 @@ docker compose up -d nginx web db redis worker beat
 echo "Waiting for nginx to be ready..."
 sleep 5
 
+# Remove dummy cert so certbot can create the real one
+echo "Removing temporary certificate..."
+rm -rf "./certbot/conf/live/$DOMAIN"
+rm -rf "./certbot/conf/archive/$DOMAIN"
+rm -f  "./certbot/conf/renewal/$DOMAIN.conf"
+
+# Stop nginx to free port 80 for certbot standalone
+echo "Stopping nginx to free port 80..."
+docker compose stop nginx
+
 # Get the real Let's Encrypt certificate
 echo "Requesting Let's Encrypt certificate for $DOMAIN..."
-docker compose run --rm --no-deps --entrypoint certbot certonly \
-    --webroot \
-    --webroot-path=/var/www/certbot \
+docker run --rm \
+    -p 80:80 \
+    -v "$(pwd)/certbot/conf:/etc/letsencrypt" \
+    -v "$(pwd)/certbot/www:/var/www/certbot" \
+    certbot/certbot certonly \
+    --standalone \
     --email "$EMAIL" \
     --agree-tos \
     --no-eff-email \
-    --force-renewal \
     -d "$DOMAIN"
 
-# Reload nginx with the real cert
-echo "Reloading nginx with real certificate..."
-docker compose exec nginx nginx -s reload
+# Start nginx with the real cert
+echo "Starting nginx with real certificate..."
+docker compose start nginx
 
 # Start remaining services
 docker compose up -d
