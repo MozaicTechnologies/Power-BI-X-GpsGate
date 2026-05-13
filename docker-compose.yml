@@ -13,11 +13,19 @@ x-app-build: &app-build
   volumes:
     - .:/app          # live-reload during dev
 
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "3"
+
 # ---------------------------------------------------------------------------
 # Infrastructure
 # ---------------------------------------------------------------------------
 services:
   redis:
+    <<: *logging
     image: redis:7-alpine
     ports:
       - "6379:6379"
@@ -30,6 +38,7 @@ services:
       retries: 5
 
   db:
+    <<: *logging
     image: postgres:15-alpine
     ports:
       - "5432:5432"
@@ -49,6 +58,7 @@ services:
 # Application services
 # ---------------------------------------------------------------------------
   nginx:
+    <<: *logging
     image: nginx:alpine
     ports:
       - "80:80"
@@ -62,6 +72,7 @@ services:
     restart: unless-stopped
 
   certbot:
+    <<: *logging
     image: certbot/certbot
     volumes:
       - ./certbot/conf:/etc/letsencrypt
@@ -69,7 +80,7 @@ services:
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --quiet; sleep 12h & wait $${!}; done;'"
 
   web:
-    <<: [*app-build, *app-env]
+    <<: [*app-build, *app-env, *logging]
     command: gunicorn wsgi:app --bind 0.0.0.0:5000 --workers 2 --reload --timeout 120
     depends_on:
       db:
@@ -78,7 +89,7 @@ services:
         condition: service_healthy
 
   worker:
-    <<: [*app-build, *app-env]
+    <<: [*app-build, *app-env, *logging]
     command: celery -A celery_worker worker --loglevel=info --concurrency=2
     depends_on:
       db:
@@ -87,7 +98,7 @@ services:
         condition: service_healthy
 
   beat:
-    <<: [*app-build, *app-env]
+    <<: [*app-build, *app-env, *logging]
     command: celery -A celery_worker beat --loglevel=info
     volumes:
       - .:/app
@@ -97,7 +108,7 @@ services:
         condition: service_healthy
 
   flower:
-    <<: [*app-build, *app-env]
+    <<: [*app-build, *app-env, *logging]
     command: >
       celery -A celery_worker flower
         --port=5555
