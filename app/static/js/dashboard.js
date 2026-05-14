@@ -5,25 +5,43 @@ yesterday.setDate(yesterday.getDate() - 1);
 document.getElementById('fact-start').value = yesterday.toISOString().split('T')[0];
 document.getElementById('fact-end').value = yesterday.toISOString().split('T')[0];
 
-// Message display function
+// Result modal
 function showMessage(type, text) {
-    const msg = document.getElementById('trigger-message');
-    msg.className = 'message ' + type;
-    msg.textContent = text;
-    msg.style.display = 'block';
-    setTimeout(() => {
-        msg.style.display = 'none';
-    }, 5000);
+    openResultModal(type, text);
 }
 
 function showCustomerConfigMessage(type, text) {
-    const msg = document.getElementById('customer-config-message');
-    msg.className = 'message ' + type;
-    msg.textContent = text;
-    msg.style.display = 'block';
-    setTimeout(() => {
-        msg.style.display = 'none';
-    }, 5000);
+    openResultModal(type, text);
+}
+
+function openResultModal(type, content) {
+    const modal  = document.getElementById('result-modal');
+    const header = document.getElementById('result-modal-header');
+    const title  = document.getElementById('result-modal-title');
+    const body   = document.getElementById('result-modal-body');
+
+    const isSuccess = type === 'success';
+    header.style.background = isSuccess ? '#d4edda' : '#f8d7da';
+    title.style.color       = isSuccess ? '#155724' : '#721c24';
+    title.textContent       = isSuccess ? '✅ Success' : '❌ Error';
+
+    // Pretty-print if JSON object, otherwise show as-is
+    if (typeof content === 'object' && content !== null) {
+        body.textContent = JSON.stringify(content, null, 2);
+    } else {
+        try {
+            const parsed = JSON.parse(content);
+            body.textContent = JSON.stringify(parsed, null, 2);
+        } catch {
+            body.textContent = content;
+        }
+    }
+
+    modal.style.display = 'flex';
+}
+
+function closeResultModal() {
+    document.getElementById('result-modal').style.display = 'none';
 }
 
 function getSelectedApplicationId() {
@@ -124,10 +142,8 @@ async function triggerDimensionSync() {
             body: JSON.stringify({application_id: applicationId})
         });
         const data = await response.json();
-        showMessage(data.success ? 'success' : 'error', data.message || data.error);
-        if (data.success) {
-            setTimeout(refreshJobs, 1000);
-        }
+        showMessage(data.success ? 'success' : 'error', data);
+        if (data.success) setTimeout(refreshJobs, 1000);
     } catch (error) {
         showMessage('error', 'Request failed: ' + error.message);
     }
@@ -159,10 +175,8 @@ async function triggerFactSync() {
             })
         });
         const data = await response.json();
-        showMessage(data.success ? 'success' : 'error', data.message || data.error);
-        if (data.success) {
-            setTimeout(refreshJobs, 1000);
-        }
+        showMessage(data.success ? 'success' : 'error', data);
+        if (data.success) setTimeout(refreshJobs, 1000);
     } catch (error) {
         showMessage('error', 'Request failed: ' + error.message);
     }
@@ -194,10 +208,8 @@ async function triggerFullBackfill() {
             })
         });
         const data = await response.json();
-        showMessage(data.success ? 'success' : 'error', data.message || data.error);
-        if (data.success) {
-            setTimeout(refreshJobs, 1000);
-        }
+        showMessage(data.success ? 'success' : 'error', data);
+        if (data.success) setTimeout(refreshJobs, 1000);
     } catch (error) {
         showMessage('error', 'Request failed: ' + error.message);
     }
