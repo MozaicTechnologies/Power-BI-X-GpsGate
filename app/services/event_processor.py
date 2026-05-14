@@ -5,11 +5,14 @@ Must be called within a Flask app context.
 """
 
 import json
+import logging
 from datetime import datetime, timedelta
 from flask import current_app
 
 from app.config import Config
 from app.services.customer_config import get_event_runtime_config
+
+logger = logging.getLogger(__name__)
 
 
 def iter_week_ranges(start_date: str, end_date: str):
@@ -31,6 +34,12 @@ def run_event_for_dates(event_type: str, start_date: str, end_date: str, custome
 
     app = current_app._get_current_object()
     runtime = get_event_runtime_config(customer, event_type, Config.BASE_URL)
+
+    logger.info(
+        "[run_event] START | event=%s | app=%s | %s → %s | report_id=%s | event_id=%s | tag_id=%s",
+        event_type, runtime.app_id, start_date, end_date,
+        runtime.report_id, runtime.event_id, runtime.tag_id,
+    )
 
     payload = {
         "app_id": runtime.app_id,
@@ -55,6 +64,17 @@ def run_event_for_dates(event_type: str, start_date: str, end_date: str, custome
             response_key=runtime.response_key,
         )
         if isinstance(response_tuple, tuple):
-            response_obj, _ = response_tuple
-            return response_obj.get_json().get("accounting", {})
+            response_obj, status_code = response_tuple
+            accounting = response_obj.get_json().get("accounting", {})
+            logger.info(
+                "[run_event] DONE  | event=%s | app=%s | status=%s | raw=%s inserted=%s skipped=%s failed=%s",
+                event_type, runtime.app_id, status_code,
+                accounting.get("raw", "?"),
+                accounting.get("inserted", "?"),
+                accounting.get("skipped", "?"),
+                accounting.get("failed", "?"),
+            )
+            return accounting
+
+        logger.warning("[run_event] UNEXPECTED response type | event=%s | app=%s | type=%s", event_type, runtime.app_id, type(response_tuple))
         return {}
