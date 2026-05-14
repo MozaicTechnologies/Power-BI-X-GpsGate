@@ -15,11 +15,6 @@
             <div class="card">
                 <h2>📊 Manual Triggers</h2>
                 
-                <div class="form-group">
-                    <button onclick="triggerDimensionSync(event)">
-                        🔄 Run Dimension Sync
-                    </button>
-                </div>
                 
                 <div class="form-group">
                     <label for="customer-app-id">Customer App</label>
@@ -137,6 +132,13 @@
                     <label for="fact-end">End Date</label>
                     <input type="date" id="fact-end" value="">
                 </div>
+
+                <div class="form-group">
+                    <button onclick="triggerDimensionSync(event)">
+                        🔄 Run Dimension Sync
+                    </button>
+                </div>
+                
                 
                 <div class="form-group">
                     <button onclick="triggerFactSync(event)">
