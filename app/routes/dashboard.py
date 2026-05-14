@@ -6,6 +6,7 @@ Provides live status monitoring and manual job execution
 from flask import Blueprint, render_template, jsonify, request
 from flask_login import login_required
 from datetime import datetime, timedelta
+from sqlalchemy import func
 from urllib.parse import urljoin
 import traceback
 import requests
@@ -426,42 +427,32 @@ def get_table_counts():
     try:
         # Use raw SQL for fact tables to avoid inheritance issues
         # (FactWH inherits from FactAWH, FactHB inherits from FactHA)
-        fact_tables = [
-            ('fact_trip', 'Trip'),
-            ('fact_speeding', 'Speeding'),
-            ('fact_idle', 'Idle'),
-            ('fact_awh', 'AWH'),
-            ('fact_wh', 'WH'),
-            ('fact_ha', 'HA'),
-            ('fact_hb', 'HB'),
-            ('fact_wu', 'WU'),
-        ]
-        
-        fact_counts = {}
-        for table_name, key in fact_tables:
+        def safe_count(model) -> int:
             try:
-                result = db.session.execute(db.text(f"SELECT COUNT(*) FROM {table_name}"))
-                fact_counts[key] = result.scalar()
+                return db.session.query(func.count()).select_from(model).scalar() or 0
             except Exception:
-                fact_counts[key] = 0
-        
-        # Dimension tables
-        dim_counts = {}
-        dim_tables = [
-            ('dim_drivers', 'Drivers'),
-            ('dim_vehicles', 'Vehicles'),
-            ('dim_tags', 'Tags'),
-            ('dim_reports', 'Reports'),
-            ('dim_event_rules', 'EventRules'),
-            ('dim_vehicle_custom_fields', 'CustomFields')
-        ]
-        
-        for table_name, key in dim_tables:
-            try:
-                result = db.session.execute(db.text(f"SELECT COUNT(*) FROM {table_name}"))
-                dim_counts[key] = result.scalar()
-            except Exception:
-                dim_counts[key] = 0
+                db.session.rollback()
+                return 0
+
+        fact_counts = {
+            'Trip':     safe_count(FactTrip),
+            'Speeding': safe_count(FactSpeeding),
+            'Idle':     safe_count(FactIdle),
+            'AWH':      safe_count(FactAWH),
+            'WH':       safe_count(FactWH),
+            'HA':       safe_count(FactHA),
+            'HB':       safe_count(FactHB),
+            'WU':       safe_count(FactWU),
+        }
+
+        dim_counts = {
+            'Drivers':      safe_count(DimDrivers),
+            'Vehicles':     safe_count(DimVehicles),
+            'Tags':         safe_count(DimTags),
+            'Reports':      safe_count(DimReports),
+            'EventRules':   safe_count(DimEventRules),
+            'CustomFields': safe_count(DimVehicleCustomFields),
+        }
         
         total = sum(fact_counts.values())
         
@@ -686,23 +677,14 @@ def cleanup_data():
                     logger.debug(f"ADMIN CLEANUP: Processing {model_class.__tablename__}")
 
                     with db.session.begin():
-                        # Use raw SQL to avoid model column mismatches
-                        from sqlalchemy import text
-
-                        # Count records before deletion
-                        count_result = db.session.execute(
-                            text(f"SELECT COUNT(*) FROM {model_class.__tablename__} WHERE application_id = :app_id"),
-                            {'app_id': application_id_int}
-                        )
-                        count_before = count_result.scalar()
+                        count_before = db.session.query(func.count()).select_from(model_class).filter(
+                            model_class.application_id == application_id_int
+                        ).scalar() or 0
                         logger.info(f"ADMIN CLEANUP: Found {count_before} records in {display_name} for application_id={application_id}")
 
-                        # Delete records
-                        delete_result = db.session.execute(
-                            text(f"DELETE FROM {model_class.__tablename__} WHERE application_id = :app_id"),
-                            {'app_id': application_id_int}
-                        )
-                        deleted = delete_result.rowcount
+                        deleted = db.session.query(model_class).filter(
+                            model_class.application_id == application_id_int
+                        ).delete(synchronize_session=False)
                         total_deleted += deleted
 
                         logger.info(f"ADMIN CLEANUP: Deleted {deleted} records from {display_name} (application_id={application_id})")

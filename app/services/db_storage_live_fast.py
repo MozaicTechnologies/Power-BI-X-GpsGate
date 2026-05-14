@@ -1,9 +1,8 @@
 import pandas as pd
 from datetime import datetime
-from sqlalchemy import text
-from sqlalchemy.exc import ResourceClosedError
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.utils.logger import setup_logger
-from app.models import db
+from app.models import db, FactTrip, FactSpeeding, FactIdle, FactAWH, FactWH, FactHA, FactHB, FactWU
 
 logger = setup_logger("DATA_PIPELINE")
 
@@ -166,37 +165,22 @@ def _build_records(df, app_id, tag_id, event_name, now):
 # Change 2: chunked INSERT (commit every CHUNK_SIZE rows)
 # ---------------------------------------------------------------------------
 
-def _chunked_insert(records, table, invalid_rows_skipped, event_name):
-    cols = list(records[0].keys())
-    sql = text(f"""
-        INSERT INTO {table} ({", ".join(cols)})
-        VALUES ({", ".join(f":{c}" for c in cols)})
-        ON CONFLICT DO NOTHING
-        RETURNING 1
-    """)
-
+def _chunked_insert(records, model, invalid_rows_skipped, event_name):
     total_inserted = 0
     total_failed   = 0
 
     for offset in range(0, len(records), CHUNK_SIZE):
         chunk = records[offset : offset + CHUNK_SIZE]
         try:
-            result = db.session.execute(sql, chunk)
-            try:
-                inserted = len(result.fetchall())
-            except ResourceClosedError:
-                inserted = result.rowcount if result.rowcount and result.rowcount > 0 else 0
+            stmt = pg_insert(model).values(chunk).on_conflict_do_nothing()
+            result = db.session.execute(stmt)
+            inserted = result.rowcount if result.rowcount and result.rowcount >= 0 else 0
             total_inserted += inserted
             db.session.commit()
-            logger.debug(
-                f"[DB_STORAGE] {event_name} chunk offset={offset} "
-                f"size={len(chunk)} inserted={inserted}"
-            )
+            logger.debug(f"[DB_STORAGE] {event_name} chunk offset={offset} size={len(chunk)} inserted={inserted}")
         except Exception:
             db.session.rollback()
-            logger.exception(
-                f"[DB_STORAGE] {event_name} chunk at offset={offset} failed"
-            )
+            logger.exception(f"[DB_STORAGE] {event_name} chunk at offset={offset} failed")
             total_failed += len(chunk)
 
     duplicate_skipped = max(0, len(records) - total_inserted)
@@ -223,18 +207,18 @@ def store_event_data_to_db(df, app_id, tag_id, event_name):
             "invalid_rows_skipped": 0, "duplicate_rows_skipped": 0,
         }
 
-    table = {
-        "Trip":     "fact_trip",
-        "Speeding": "fact_speeding",
-        "Idle":     "fact_idle",
-        "AWH":      "fact_awh",
-        "WH":       "fact_wh",
-        "HA":       "fact_ha",
-        "HB":       "fact_hb",
-        "WU":       "fact_wu",
+    model = {
+        "Trip":     FactTrip,
+        "Speeding": FactSpeeding,
+        "Idle":     FactIdle,
+        "AWH":      FactAWH,
+        "WH":       FactWH,
+        "HA":       FactHA,
+        "HB":       FactHB,
+        "WU":       FactWU,
     }.get(event_name)
 
-    if not table:
+    if not model:
         logger.warning(f"[DB_STORAGE] Unknown event_name={event_name}")
         return {
             "inserted": 0, "skipped": 0, "failed": 0,
@@ -255,4 +239,4 @@ def store_event_data_to_db(df, app_id, tag_id, event_name):
             "invalid_rows_skipped": invalid_rows_skipped, "duplicate_rows_skipped": 0,
         }
 
-    return _chunked_insert(records, table, invalid_rows_skipped, event_name)
+    return _chunked_insert(records, model, invalid_rows_skipped, event_name)
