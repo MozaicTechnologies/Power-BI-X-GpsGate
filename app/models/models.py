@@ -56,14 +56,15 @@ class FactTrip(db.Model):
     address = db.Column(db.Text)
     location = db.Column(db.Text)
 
-    duration = db.Column(db.String(50))
+    duration     = db.Column(db.String(50))
+    duration_s   = db.Column(db.Integer)
     distance_gps = db.Column(db.Float)
-    max_speed = db.Column(db.Float)
-    avg_speed = db.Column(db.Float)
+    max_speed    = db.Column(db.Float)
+    avg_speed    = db.Column(db.Float)
 
-    event_state = db.Column(db.String(50))
+    event_state  = db.Column(db.String(50))
     is_duplicate = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=_utcnow)
+    created_at   = db.Column(db.DateTime, default=_utcnow)
 
     __table_args__ = (
         db.UniqueConstraint("app_id", "event_date", "start_time", "vehicle",
