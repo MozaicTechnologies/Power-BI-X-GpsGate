@@ -1,6 +1,10 @@
+import logging
+
 from app.celery_app import celery
 from app.services.customer_config import EVENT_CONFIG, load_customers
 from app.services.event_processor import iter_week_ranges, run_event_for_dates
+
+logger = logging.getLogger(__name__)
 
 
 def _get_customer(application_id):
@@ -30,7 +34,7 @@ def _progress(self, done, total, status, **extra):
 
 @celery.task(bind=True, name="tasks.fact_sync", track_started=True)
 def fact_sync_task(self, start_date: str, end_date: str, application_id=None):
-    customer = _get_customer(application_id)
+    customer    = _get_customer(application_id)
     event_types = list(EVENT_CONFIG.keys())
     week_ranges = list(iter_week_ranges(start_date, end_date))
     total_steps = len(week_ranges) * len(event_types)
@@ -38,9 +42,17 @@ def fact_sync_task(self, start_date: str, end_date: str, application_id=None):
     total_inserted = total_skipped = total_failed = 0
     results = {}
 
+    logger.info(
+        "[fact_sync] START | app=%s | %s → %s | weeks=%d | event_types=%d | total_steps=%d",
+        application_id, start_date, end_date, len(week_ranges), len(event_types), total_steps,
+    )
+
     for week_start, week_end in week_ranges:
-        week_key = f"{week_start} → {week_end}"
+        week_key     = f"{week_start} → {week_end}"
         week_results = {}
+
+        logger.info("[fact_sync] WEEK | app=%s | %s", application_id, week_key)
+
         for et in event_types:
             _progress(
                 self, done, total_steps,
@@ -52,23 +64,40 @@ def fact_sync_task(self, start_date: str, end_date: str, application_id=None):
             try:
                 result = run_event_for_dates(et, week_start, week_end, customer)
                 week_results[et] = result
-                total_inserted += result.get("inserted", 0)
-                total_skipped  += result.get("skipped", 0)
-                total_failed   += result.get("failed", 0)
+                ins  = result.get("inserted", 0)
+                skip = result.get("skipped",  0)
+                fail = result.get("failed",   0)
+                total_inserted += ins
+                total_skipped  += skip
+                total_failed   += fail
+                logger.info(
+                    "[fact_sync] OK  | app=%s | week=%s | event=%s | inserted=%d skipped=%d failed=%d",
+                    application_id, week_key, et, ins, skip, fail,
+                )
             except Exception as exc:
                 week_results[et] = {"status": "failed", "error": str(exc)}
                 total_failed += 1
+                logger.error(
+                    "[fact_sync] ERR | app=%s | week=%s | event=%s | %s",
+                    application_id, week_key, et, exc,
+                )
             done += 1
+
         results[week_key] = week_results
 
+    logger.info(
+        "[fact_sync] DONE | app=%s | %s → %s | inserted=%d skipped=%d failed=%d",
+        application_id, start_date, end_date, total_inserted, total_skipped, total_failed,
+    )
+
     return {
-        "status": "completed",
-        "start_date": start_date,
-        "end_date": end_date,
+        "status":         "completed",
+        "start_date":     start_date,
+        "end_date":       end_date,
         "total_inserted": total_inserted,
-        "total_skipped": total_skipped,
-        "total_failed": total_failed,
-        "results": results,
+        "total_skipped":  total_skipped,
+        "total_failed":   total_failed,
+        "results":        results,
     }
 
 
