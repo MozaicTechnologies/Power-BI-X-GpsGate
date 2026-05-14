@@ -122,6 +122,7 @@ services:
       celery -A celery_worker flower
         --port=5555
         --basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-admin}
+        --result_max_length=0
     ports:
       - "5555:5555"
     depends_on:

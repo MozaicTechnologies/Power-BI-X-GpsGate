@@ -117,3 +117,4 @@ logs/
 
 celerybeat-schedule
 certbot
+migrations
