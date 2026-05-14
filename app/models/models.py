@@ -1,5 +1,8 @@
 from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime
+from datetime import datetime, timezone
+
+def _utcnow():
+    return datetime.now(timezone.utc)
 
 db = SQLAlchemy()
 
@@ -18,7 +21,7 @@ class Render(db.Model):
     event_id = db.Column(db.String(100))
     report_id = db.Column(db.String(100), nullable=False)
     render_id = db.Column(db.String(100), unique=True, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=_utcnow)
 
 
 class Result(db.Model):
@@ -32,7 +35,7 @@ class Result(db.Model):
     gdrive_file_id = db.Column(db.String(128))
     gdrive_link = db.Column(db.String(1024))
     uploaded_at = db.Column(db.DateTime)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=_utcnow)
 
 # ------------------------------------------------------------------
 # FACT TABLES (NO MIXIN – EXPLICIT IS SAFER)
@@ -60,7 +63,7 @@ class FactTrip(db.Model):
 
     event_state = db.Column(db.String(50))
     is_duplicate = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=_utcnow)
 
     __table_args__ = (
         db.UniqueConstraint("app_id", "event_date", "start_time", "vehicle",
@@ -92,7 +95,7 @@ class FactSpeeding(db.Model):
     over_limit = db.Column(db.Float)
 
     is_duplicate = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=_utcnow)
 
     __table_args__ = (
         db.UniqueConstraint("app_id", "event_date", "start_time", "vehicle",
@@ -123,7 +126,7 @@ class FactIdle(db.Model):
     duration_s = db.Column(db.Integer)
 
     is_duplicate = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=_utcnow)
 
     __table_args__ = (
         db.UniqueConstraint("app_id", "event_date", "start_time", "vehicle",
@@ -150,7 +153,7 @@ class FactAWH(db.Model):
     duration_s = db.Column(db.Integer)
 
     is_duplicate = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=_utcnow)
 
     __table_args__ = (
         db.UniqueConstraint("app_id", "event_date", "start_time", "vehicle",
@@ -158,8 +161,38 @@ class FactAWH(db.Model):
     )
 
 
-class FactWH(FactAWH):
+class FactWH(db.Model):
     __tablename__ = "fact_wh"
+
+    id          = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    app_id      = db.Column(db.String(100), nullable=False)
+    tag_id      = db.Column(db.String(100), nullable=False)
+
+    event_date  = db.Column(db.Date, nullable=False)
+    start_time  = db.Column(db.Time)
+    event_time  = db.Column(db.DateTime, nullable=False)
+    event_start_ts = db.Column(db.DateTime)
+    event_end_ts   = db.Column(db.DateTime)
+
+    vehicle     = db.Column(db.String(255))
+    driver      = db.Column(db.String(255))
+    location    = db.Column(db.String(500))
+    address     = db.Column(db.Text)
+
+    duration    = db.Column(db.String(50))
+    duration_s  = db.Column(db.Integer)
+
+    is_duplicate = db.Column(db.Boolean, nullable=False, default=False)
+    created_at   = db.Column(db.DateTime, nullable=False, default=_utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("app_id", "event_date", "start_time", "vehicle",  name="uq_fact_wh_dedup"),
+        db.UniqueConstraint("app_id", "tag_id", "event_date", "event_time", "vehicle", name="ux_fact_wh_unique"),
+        db.UniqueConstraint("app_id", "tag_id", "event_time", "vehicle",               name="ux_fact_wh"),
+        db.Index("ix_fact_wh_app_id",    "app_id"),
+        db.Index("ix_fact_wh_event_date", "event_date"),
+        db.Index("ix_fact_wh_vehicle",    "vehicle"),
+    )
 
 
 class FactHA(db.Model):
@@ -183,7 +216,7 @@ class FactHA(db.Model):
     duration_s = db.Column(db.Integer)
 
     is_duplicate = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=_utcnow)
 
     __table_args__ = (
         db.UniqueConstraint("app_id", "event_date", "start_time", "vehicle",
@@ -216,7 +249,7 @@ class FactWU(db.Model):
     duration_s = db.Column(db.Integer)
 
     is_duplicate = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=_utcnow)
 
     __table_args__ = (
         db.UniqueConstraint("app_id", "event_date", "start_time", "vehicle",
@@ -265,7 +298,7 @@ class DimTags(db.Model):
     id = db.Column(db.BigInteger, nullable=False, primary_key=True)
     application_id = db.Column(db.BigInteger, nullable=False, primary_key=True)
     name = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=_utcnow)
 
 
 class DimEventRules(db.Model):
@@ -275,7 +308,7 @@ class DimEventRules(db.Model):
     id = db.Column(db.BigInteger, nullable=False, primary_key=True)
     application_id = db.Column(db.BigInteger, nullable=False, primary_key=True)
     name = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=_utcnow)
 
 
 class DimReports(db.Model):
@@ -285,7 +318,7 @@ class DimReports(db.Model):
     id = db.Column(db.BigInteger, nullable=False, primary_key=True)
     application_id = db.Column(db.BigInteger, nullable=False, primary_key=True)
     name = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=_utcnow)
 
 
 class DimVehicles(db.Model):
@@ -296,7 +329,7 @@ class DimVehicles(db.Model):
     application_id = db.Column(db.BigInteger, nullable=False, primary_key=True)
     name = db.Column(db.Text)
     username = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=_utcnow)
     device_name = db.Column(db.Text)
     imei = db.Column(db.Text)
     latitude = db.Column(db.Float)
@@ -314,7 +347,7 @@ class DimDrivers(db.Model):
     name = db.Column(db.Text)
     username = db.Column(db.Text)
     driver_id = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=_utcnow)
     device_name = db.Column(db.Text)
     imei = db.Column(db.Text)
     latitude = db.Column(db.Float)
@@ -330,7 +363,7 @@ class DimVehicleCustomFields(db.Model):
     vehicle_id = db.Column(db.BigInteger, nullable=False, primary_key=True)
     field_name = db.Column(db.Text, nullable=False, primary_key=True)
     field_value = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=_utcnow)
     application_id = db.Column(db.Integer, nullable=False, primary_key=True)
 
     __table_args__ = (
