@@ -9,7 +9,7 @@ x-app-env: &app-env
   env_file: .env
   environment:
     TZ:                      Asia/Muscat
-    DATABASE_URL:            postgresql+psycopg://gpsgate:gpsgate@db:5432/gpsgate_dev
+    DATABASE_URL:            postgresql+psycopg://gpsgate:YjcztjyRTuVLfzapCplQBpVreGChKQX@db:5432/gpsgate_dev
     CELERY_BROKER_URL:       redis://redis:6379/0
     CELERY_RESULT_BACKEND:   redis://redis:6379/0
 
@@ -51,7 +51,7 @@ services:
       TZ:                Asia/Muscat
       POSTGRES_DB:       gpsgate_dev
       POSTGRES_USER:     gpsgate
-      POSTGRES_PASSWORD: gpsgate
+      POSTGRES_PASSWORD: YjcztjyRTuVLfzapCplQBpVreGChKQX
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
