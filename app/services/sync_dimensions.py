@@ -323,7 +323,7 @@ def sync_vehicles_and_drivers(session, application_id: int, auth_token: str) -> 
     return len(vehicle_rows) + len(driver_rows)
 
 
-def sync_vehicle_custom_fields(session, application_id: int, auth_token: str) -> int:
+def sync_vehicle_custom_fields(session, application_id: int, auth_token: str, on_progress=None) -> int:
     from app.models import DimVehicleCustomFields
 
     log(f"Syncing dim_vehicle_custom_fields for app {application_id}")
@@ -349,6 +349,8 @@ def sync_vehicle_custom_fields(session, application_id: int, auth_token: str) ->
             continue
         if idx % 25 == 0:
             log(f"Custom fields progress for app {application_id}: {idx}/{len(users)}")
+            if on_progress:
+                on_progress(f"App {application_id} — Custom Fields {idx}/{len(users)}", idx, len(users))
         try:
             fields = call_api(base_url=BASE_URL, path=f"comGpsGate/api/v.1/applications/{application_id}/users/{user_id}/customfields", token=auth_token, timeout=30)
         except Exception:
@@ -370,37 +372,59 @@ def sync_vehicle_custom_fields(session, application_id: int, auth_token: str) ->
 # Entry point
 # ---------------------------------------------------------------------------
 
-def _run_sync(session, only_application_id: str | None = None) -> int:
-    log("Starting dimension sync")
-    start = time.time()
-    total = 0
+_STEPS = ["Tags", "Event Rules", "Reports", "Vehicles & Drivers", "Custom Fields"]
+_N_STEPS = len(_STEPS)
 
-    for customer in load_customer_configs(session, only_application_id):
+
+def _run_sync(session, only_application_id: str | None = None, on_progress=None) -> int:
+    log("Starting dimension sync")
+    start   = time.time()
+    total   = 0
+
+    customers   = load_customer_configs(session, only_application_id)
+    n_customers = len(customers)
+    total_steps = n_customers * _N_STEPS
+    done        = 0
+
+    def _report(step_label: str, sub_status: str = ""):
+        if not on_progress:
+            return
+        percent = int(done / total_steps * 100) if total_steps else 0
+        status  = f"App {app_id} — {step_label}"
+        if sub_status:
+            status += f" ({sub_status})"
+        on_progress(status, done, total_steps, percent)
+
+    for cust_idx, customer in enumerate(customers):
         app_id     = customer["application_id"]
         auth_token = customer["token"]
         log(f"Starting customer dimension sync for app {app_id}")
 
-        total += sync_tags(session, app_id, auth_token);               session.commit()
-        total += sync_event_rules(session, app_id, auth_token);        session.commit()
-        total += sync_reports(session, app_id, auth_token);            session.commit()
-        total += sync_vehicles_and_drivers(session, app_id, auth_token); session.commit()
-        total += sync_vehicle_custom_fields(session, app_id, auth_token); session.commit()
-        update_customer_config_from_dims(session, customer);           session.commit()
+        _report("Tags");                         total += sync_tags(session, app_id, auth_token);                                              session.commit(); done += 1
+        _report("Event Rules");                  total += sync_event_rules(session, app_id, auth_token);                                       session.commit(); done += 1
+        _report("Reports");                      total += sync_reports(session, app_id, auth_token);                                           session.commit(); done += 1
+        _report("Vehicles & Drivers");           total += sync_vehicles_and_drivers(session, app_id, auth_token);                             session.commit(); done += 1
+        _report("Custom Fields");                total += sync_vehicle_custom_fields(session, app_id, auth_token, on_progress=lambda s, c, t: _report("Custom Fields", s.split("—")[-1].strip() if "—" in s else s)); session.commit(); done += 1
+
+        update_customer_config_from_dims(session, customer)
+        session.commit()
+
+    if on_progress:
+        on_progress("Completed", total_steps, total_steps, 100)
 
     log(f"Completed in {round(time.time() - start, 2)}s — Total records: {total:,}")
     return total
 
 
-def main(only_application_id: str | int | None = None) -> int:
+def main(only_application_id: str | int | None = None, on_progress=None) -> int:
     from app.models import db
 
     selected = str(only_application_id) if only_application_id is not None else None
 
-    # When called from CLI (not inside Flask app context), build one
     try:
         from flask import has_app_context
         if has_app_context():
-            return _run_sync(db.session, selected)
+            return _run_sync(db.session, selected, on_progress)
         raise RuntimeError("no app context")
     except RuntimeError:
         if selected is None:
@@ -409,7 +433,7 @@ def main(only_application_id: str | int | None = None) -> int:
         from app import create_app
         app = create_app()
         with app.app_context():
-            return _run_sync(db.session, selected)
+            return _run_sync(db.session, selected, on_progress)
 
 
 if __name__ == "__main__":

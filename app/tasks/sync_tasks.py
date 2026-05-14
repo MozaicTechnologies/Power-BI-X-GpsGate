@@ -23,7 +23,15 @@ def dimension_sync_task(self, application_id=None):
 
     from app.services.sync_dimensions import main as sync_main
 
-    total = sync_main(application_id) or 0
+    def on_progress(status, current, total, percent=None):
+        if percent is None:
+            percent = int(current / total * 100) if total else 0
+        self.update_state(
+            state="PROGRESS",
+            meta={"percent": percent, "status": status, "current": current, "total": total},
+        )
+
+    total = sync_main(application_id, on_progress=on_progress) or 0
 
     return {"status": "completed", "records": total}
 
