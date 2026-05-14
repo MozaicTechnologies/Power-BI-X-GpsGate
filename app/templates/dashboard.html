@@ -16,7 +16,7 @@
                 <h2>📊 Manual Triggers</h2>
                 
                 <div class="form-group">
-                    <button onclick="triggerDimensionSync()">
+                    <button onclick="triggerDimensionSync(event)">
                         🔄 Run Dimension Sync
                     </button>
                 </div>
@@ -139,13 +139,13 @@
                 </div>
                 
                 <div class="form-group">
-                    <button onclick="triggerFactSync()">
+                    <button onclick="triggerFactSync(event)">
                         📈 Run Fact Sync
                     </button>
                 </div>
-                
+
                 <div class="form-group">
-                    <button onclick="triggerFullBackfill()">
+                    <button onclick="triggerFullBackfill(event)">
                         🔥 Run Full Backfill
                     </button>
                 </div>
@@ -274,9 +274,8 @@
     <div id="result-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:2000; align-items:center; justify-content:center;">
         <div style="background:#fff; border-radius:14px; box-shadow:0 12px 40px rgba(0,0,0,0.35); width:90%; max-width:680px; max-height:80vh; display:flex; flex-direction:column; overflow:hidden;">
             <!-- Header -->
-            <div id="result-modal-header" style="display:flex; align-items:center; justify-content:space-between; padding:18px 24px; border-bottom:1px solid #eee;">
+            <div id="result-modal-header" style="display:flex; align-items:center; padding:18px 24px; border-bottom:1px solid #eee;">
                 <span id="result-modal-title" style="font-size:1.15rem; font-weight:700;"></span>
-                <button onclick="closeResultModal()" style="background:none; border:none; font-size:1.5rem; cursor:pointer; color:#888; line-height:1; padding:0 4px;">&times;</button>
             </div>
             <!-- Scrollable body -->
             <div id="result-modal-body" style="padding:20px 24px; overflow-y:auto; flex:1; font-family:monospace; font-size:0.88rem; white-space:pre-wrap; word-break:break-word; line-height:1.6;"></div>

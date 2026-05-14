@@ -5,6 +5,23 @@ yesterday.setDate(yesterday.getDate() - 1);
 document.getElementById('fact-start').value = yesterday.toISOString().split('T')[0];
 document.getElementById('fact-end').value = yesterday.toISOString().split('T')[0];
 
+// Button loading state
+function setLoading(btn, loading) {
+    if (!btn) return;
+    if (loading) {
+        btn._originalText = btn.innerHTML;
+        btn.innerHTML = '⏳ Running…';
+        btn.disabled = true;
+        btn.style.opacity = '0.7';
+        btn.style.cursor = 'not-allowed';
+    } else {
+        btn.innerHTML = btn._originalText || btn.innerHTML;
+        btn.disabled = false;
+        btn.style.opacity = '';
+        btn.style.cursor = '';
+    }
+}
+
 // Result modal
 function showMessage(type, text) {
     openResultModal(type, text);
@@ -129,12 +146,11 @@ async function saveCustomerConfig() {
 }
 
 // Trigger functions
-async function triggerDimensionSync() {
+async function triggerDimensionSync(event) {
+    const btn = event?.currentTarget || event?.target;
     const applicationId = getSelectedApplicationId();
-    if (!applicationId) {
-        showMessage('error', 'Please select a customer');
-        return;
-    }
+    if (!applicationId) { showMessage('error', 'Please select a customer'); return; }
+    setLoading(btn, true);
     try {
         const response = await fetch('/dashboard/trigger/dimension-sync', {
             method: 'POST',
@@ -146,72 +162,56 @@ async function triggerDimensionSync() {
         if (data.success) setTimeout(refreshJobs, 1000);
     } catch (error) {
         showMessage('error', 'Request failed: ' + error.message);
+    } finally {
+        setLoading(btn, false);
     }
 }
 
-async function triggerFactSync() {
+async function triggerFactSync(event) {
+    const btn = event?.currentTarget || event?.target;
     const applicationId = getSelectedApplicationId();
     const startDate = document.getElementById('fact-start').value;
-    const endDate = document.getElementById('fact-end').value;
-
-    if (!applicationId) {
-        showMessage('error', 'Please select a customer');
-        return;
-    }
-
-    if (!startDate || !endDate) {
-        showMessage('error', 'Please select start and end dates');
-        return;
-    }
-
+    const endDate   = document.getElementById('fact-end').value;
+    if (!applicationId)      { showMessage('error', 'Please select a customer'); return; }
+    if (!startDate || !endDate) { showMessage('error', 'Please select start and end dates'); return; }
+    setLoading(btn, true);
     try {
         const response = await fetch('/dashboard/trigger/fact-sync', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                application_id: applicationId,
-                start_date: startDate,
-                end_date: endDate
-            })
+            body: JSON.stringify({application_id: applicationId, start_date: startDate, end_date: endDate})
         });
         const data = await response.json();
         showMessage(data.success ? 'success' : 'error', data);
         if (data.success) setTimeout(refreshJobs, 1000);
     } catch (error) {
         showMessage('error', 'Request failed: ' + error.message);
+    } finally {
+        setLoading(btn, false);
     }
 }
 
-async function triggerFullBackfill() {
+async function triggerFullBackfill(event) {
+    const btn = event?.currentTarget || event?.target;
     const applicationId = getSelectedApplicationId();
     const startDate = document.getElementById('fact-start').value;
-    const endDate = document.getElementById('fact-end').value;
-
-    if (!applicationId) {
-        showMessage('error', 'Please select a customer');
-        return;
-    }
-
-    if (!startDate || !endDate) {
-        showMessage('error', 'Please select start and end dates');
-        return;
-    }
-
+    const endDate   = document.getElementById('fact-end').value;
+    if (!applicationId)         { showMessage('error', 'Please select a customer'); return; }
+    if (!startDate || !endDate) { showMessage('error', 'Please select start and end dates'); return; }
+    setLoading(btn, true);
     try {
         const response = await fetch('/dashboard/trigger/full-backfill', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                application_id: applicationId,
-                start_date: startDate,
-                end_date: endDate
-            })
+            body: JSON.stringify({application_id: applicationId, start_date: startDate, end_date: endDate})
         });
         const data = await response.json();
         showMessage(data.success ? 'success' : 'error', data);
         if (data.success) setTimeout(refreshJobs, 1000);
     } catch (error) {
         showMessage('error', 'Request failed: ' + error.message);
+    } finally {
+        setLoading(btn, false);
     }
 }
 
