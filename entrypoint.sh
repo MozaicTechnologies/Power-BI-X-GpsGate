@@ -13,3 +13,7 @@ flask db upgrade
 
 echo "[ENTRYPOINT] Starting application..."
 exec "$@"
+
+#OR USE THESE COMMANDS
+# docker compose exec web flask db migrate -m "add duration_s to fact_trip"
+# docker compose exec web flask db upgrade

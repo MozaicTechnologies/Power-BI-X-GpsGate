@@ -146,3 +146,12 @@ async function loadEligibleApplications() {
 }
 
 loadEligibleApplications();
+
+document.getElementById('customer-app-id').addEventListener('change', function () {
+    const appId = this.value;
+    if (!appId) return;
+    const token = (typeof _customerTokenMap !== 'undefined') ? _customerTokenMap[String(appId)] : null;
+    if (token) {
+        document.getElementById('customer-token').value = token;
+    }
+});

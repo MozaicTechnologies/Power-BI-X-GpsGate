@@ -48,6 +48,7 @@ def serialize_customer_config(customer: CustomerConfig) -> dict:
     return {
         "application_id": customer.application_id,
         "token": mask_token(customer.token),
+        "full_token": (customer.token or "").strip(),
         "tag_name": customer.tag_name,
         "trip_report_name": customer.trip_report_name,
         "event_report_name": customer.event_report_name,

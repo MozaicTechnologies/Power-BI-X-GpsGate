@@ -65,6 +65,8 @@ function getSelectedApplicationId() {
     return document.getElementById('manual-application-id').value.trim();
 }
 
+        const _customerTokenMap = {};
+
         async function refreshCustomerConfigs() {
             try {
                 const response = await fetch('/dashboard/customer-config');
@@ -88,6 +90,9 @@ function getSelectedApplicationId() {
                 `).join('');
                 select.innerHTML = '<option value="">Select customer</option>' + optionsHtml;
                 cleanupSelect.innerHTML = '<option value="">Select customer</option>' + optionsHtml;
+                data.customers.forEach(c => {
+                    if (c.full_token) _customerTokenMap[String(c.application_id)] = c.full_token;
+                });
                 if (currentSelection && data.customers.some(customer => customer.application_id === currentSelection)) {
                     select.value = currentSelection;
                 } else {
