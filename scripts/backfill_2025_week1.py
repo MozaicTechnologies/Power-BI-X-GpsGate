@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Run backfill for a supplied date range using customer_config values."""
+"""Run backfill for a supplied date range using gpsgate_application values."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 os.environ["BACKFILL_MODE"] = "false"
 os.environ["FETCH_CURRENT_WEEK"] = "false"
 
-print("[BACKFILL] Starting customer-config backfill", flush=True)
+print("[BACKFILL] Starting gpsgate-application backfill", flush=True)
 print(f"[BACKFILL] Python: {sys.version}", flush=True)
 
 load_dotenv()
@@ -57,7 +57,7 @@ def parse_args() -> argparse.Namespace:
 def normalize_token(token: str | None) -> str:
     token = (token or "").strip()
     if not token:
-        raise RuntimeError("Missing token in customer_config")
+        raise RuntimeError("Missing token in gpsgate_application")
     if token.lower().startswith("bearer "):
         return token
     if token.startswith("v1:") or token.startswith("v2:"):
@@ -65,30 +65,34 @@ def normalize_token(token: str | None) -> str:
     return f"v2:{token}"
 
 
-def load_customers(app_id_filter: str | None = None):
-    from app.models import CustomerConfig
+def load_applications(app_id_filter: int | None = None):
+    from app.models import GpsGateApplication
 
-    query = CustomerConfig.query
+    query = GpsGateApplication.query
     if app_id_filter:
-        query = query.filter_by(application_id=str(app_id_filter))
-    customers = query.order_by(CustomerConfig.application_id).all()
+        query = query.filter_by(application_id=app_id_filter)
+    applications = query.order_by(GpsGateApplication.application_id).all()
 
-    if not customers:
-        label = f"application_id={app_id_filter}" if app_id_filter else "any customer"
-        print(f"[BACKFILL] No customer_config row found for {label}", flush=True)
-    return customers
+    if not applications:
+        label = f"application_id={app_id_filter}" if app_id_filter else "any application"
+        print(f"[BACKFILL] No gpsgate_application row found for {label}", flush=True)
+    return applications
 
 
-def build_payload(customer, endpoint: dict, week_start: datetime, week_end: datetime) -> dict:
-    report_id = customer.trip_report_id if endpoint["name"] == "Trip" else customer.event_report_id
-    event_id = getattr(customer, endpoint["event_id_col"], None) if endpoint["event_id_col"] else None
+# Keep old function name as alias for backwards compatibility
+load_customers = load_applications
+
+
+def build_payload(app, endpoint: dict, week_start: datetime, week_end: datetime) -> dict:
+    report_id = app.trip_report_id if endpoint["name"] == "Trip" else app.event_report_id
+    event_id = getattr(app, endpoint["event_id_col"], None) if endpoint["event_id_col"] else None
 
     payload = {
-        "app_id": customer.application_id,
-        "token": normalize_token(customer.token),
+        "app_id": app.application_id,
+        "token": normalize_token(app.token),
         "base_url": BASE_URL,
         "report_id": report_id,
-        "tag_id": customer.tag_id,
+        "tag_id": app.tag_id,
         "period_start": f"{week_start.strftime('%Y-%m-%d')}T00:00:00Z",
         "period_end": f"{week_end.strftime('%Y-%m-%d')}T23:59:59Z",
     }
@@ -97,12 +101,12 @@ def build_payload(customer, endpoint: dict, week_start: datetime, week_end: date
     return payload
 
 
-def validate_customer_shared(customer) -> list[str]:
+def validate_application_shared(app) -> list[str]:
     missing = []
     required_values = [
-        ("application_id", customer.application_id),
-        ("token", customer.token),
-        ("tag_id", customer.tag_id),
+        ("application_id", app.application_id),
+        ("token", app.token),
+        ("tag_id", app.tag_id),
     ]
 
     for field_name, value in required_values:
@@ -159,7 +163,7 @@ def main() -> int:
     if args.app_id:
         print(f"[BACKFILL] Filtering  : application_id={args.app_id}", flush=True)
     else:
-        print("[BACKFILL] Running for : ALL customers", flush=True)
+        print("[BACKFILL] Running for : ALL applications", flush=True)
 
     print("=" * 80)
     print("BACKFILL EXECUTION STARTED")
@@ -167,42 +171,43 @@ def main() -> int:
 
     grand_totals = {"raw": 0, "inserted": 0, "skipped": 0, "failed": 0}
 
+    app_id_int = int(args.app_id) if args.app_id else None
     with app.app_context():
-        customers = load_customers(args.app_id)
-        if not customers:
+        applications = load_applications(app_id_int)
+        if not applications:
             print("[BACKFILL] Nothing to do. Exiting.", flush=True)
             return 0
 
-        for customer in customers:
+        for app in applications:
             print(f"\n{'=' * 80}")
-            print(f"CUSTOMER: application_id={customer.application_id}")
+            print(f"APPLICATION: application_id={app.application_id}")
             print(f"{'=' * 80}")
 
-            missing = validate_customer_shared(customer)
+            missing = validate_application_shared(app)
             if missing:
                 print(
-                    f"[BACKFILL] Skipping application_id={customer.application_id} - missing config: {sorted(set(missing))}",
+                    f"[BACKFILL] Skipping application_id={app.application_id} - missing config: {sorted(set(missing))}",
                     flush=True,
                 )
-                print("[BACKFILL] Run refresh_customer_config_from_dims.py first", flush=True)
+                print("[BACKFILL] Run dimension sync first", flush=True)
                 continue
 
-            customer_totals = {"raw": 0, "inserted": 0, "skipped": 0, "failed": 0}
+            app_totals = {"raw": 0, "inserted": 0, "skipped": 0, "failed": 0}
 
             for idx, endpoint in enumerate(ENDPOINTS, start=1):
-                print(f"\n[{idx}/{len(ENDPOINTS)}] application_id={customer.application_id} -> {endpoint['name']}")
+                print(f"\n[{idx}/{len(ENDPOINTS)}] application_id={app.application_id} -> {endpoint['name']}")
                 print("-" * 80)
 
-                endpoint_missing = validate_endpoint(customer, endpoint)
+                endpoint_missing = validate_endpoint(app, endpoint)
                 if endpoint_missing:
                     print(
-                        f"[BACKFILL] Skipping event {endpoint['name']} for application_id={customer.application_id} "
+                        f"[BACKFILL] Skipping event {endpoint['name']} for application_id={app.application_id} "
                         f"- missing config: {sorted(set(endpoint_missing))}",
                         flush=True,
                     )
                     continue
 
-                payload = build_payload(customer, endpoint, week_start, week_end)
+                payload = build_payload(app, endpoint, week_start, week_end)
                 accounting = run_event(endpoint, payload)
 
                 raw = accounting.get("raw", 0)
@@ -216,14 +221,14 @@ def main() -> int:
                 print(f"  Skipped: {skipped}")
                 print(f"  Failed: {failed}")
 
-                customer_totals["raw"] += raw
-                customer_totals["inserted"] += inserted
-                customer_totals["skipped"] += skipped
-                customer_totals["failed"] += failed
+                app_totals["raw"] += raw
+                app_totals["inserted"] += inserted
+                app_totals["skipped"] += skipped
+                app_totals["failed"] += failed
 
             print("\n" + "-" * 80)
-            print(f"CUSTOMER SUMMARY: application_id={customer.application_id}")
-            for key, value in customer_totals.items():
+            print(f"APPLICATION SUMMARY: application_id={app.application_id}")
+            for key, value in app_totals.items():
                 print(f"  {key.capitalize():<10}: {value}")
                 grand_totals[key] += value
             print("-" * 80)

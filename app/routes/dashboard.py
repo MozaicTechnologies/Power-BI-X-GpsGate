@@ -13,7 +13,7 @@ import requests
 import os
 from app.models import (
     db,
-    CustomerConfig,
+    GpsGateApplication,
     FactTrip,
     FactSpeeding,
     FactIdle,
@@ -29,7 +29,7 @@ from app.models import (
     DimDrivers,
     DimVehicleCustomFields,
 )
-from app.services.customer_config import get_event_runtime_config, load_customers, normalize_token
+from app.services.customer_config import get_event_runtime_config, load_applications, normalize_token
 from app.utils.logger import setup_logger
 from app.config import Config
 
@@ -44,34 +44,158 @@ def mask_token(token: str | None) -> str:
     return f"{token[:6]}...{token[-4:]}"
 
 
-def serialize_customer_config(customer: CustomerConfig) -> dict:
+def serialize_gpsgate_application(app: GpsGateApplication) -> dict:
     return {
-        "application_id": customer.application_id,
-        "token": mask_token(customer.token),
-        "full_token": (customer.token or "").strip(),
-        "tag_name": customer.tag_name,
-        "trip_report_name": customer.trip_report_name,
-        "event_report_name": customer.event_report_name,
-        "speed_event_rule_name": customer.speed_event_rule_name,
-        "idle_event_rule_name": customer.idle_event_rule_name,
-        "awh_event_rule_name": customer.awh_event_rule_name,
-        "ha_event_rule_name": customer.ha_event_rule_name,
-        "hb_event_rule_name": customer.hb_event_rule_name,
-        "hc_event_rule_name": customer.hc_event_rule_name,
-        "wu_event_rule_name": customer.wu_event_rule_name,
-        "wh_event_rule_name": customer.wh_event_rule_name,
-        "tag_id": customer.tag_id,
-        "trip_report_id": customer.trip_report_id,
-        "event_report_id": customer.event_report_id,
-        "speed_event_id": customer.speed_event_id,
-        "idle_event_id": customer.idle_event_id,
-        "awh_event_id": customer.awh_event_id,
-        "ha_event_id": customer.ha_event_id,
-        "hb_event_id": customer.hb_event_id,
-        "hc_event_id": customer.hc_event_id,
-        "wu_event_id": customer.wu_event_id,
-        "wh_event_id": customer.wh_event_id,
+        "id": app.id,
+        "application_id": app.application_id,
+        "token": mask_token(app.token),
+        "full_token": (app.token or "").strip(),
+        "tag_name": app.tag_name,
+        "trip_report_name": app.trip_report_name,
+        "event_report_name": app.event_report_name,
+        "speed_event_rule_name": app.speed_event_rule_name,
+        "idle_event_rule_name": app.idle_event_rule_name,
+        "awh_event_rule_name": app.awh_event_rule_name,
+        "ha_event_rule_name": app.ha_event_rule_name,
+        "hb_event_rule_name": app.hb_event_rule_name,
+        "hc_event_rule_name": app.hc_event_rule_name,
+        "wu_event_rule_name": app.wu_event_rule_name,
+        "wh_event_rule_name": app.wh_event_rule_name,
+        "tag_id": app.tag_id,
+        "trip_report_id": app.trip_report_id,
+        "event_report_id": app.event_report_id,
+        "speed_event_id": app.speed_event_id,
+        "idle_event_id": app.idle_event_id,
+        "awh_event_id": app.awh_event_id,
+        "ha_event_id": app.ha_event_id,
+        "hb_event_id": app.hb_event_id,
+        "hc_event_id": app.hc_event_id,
+        "wu_event_id": app.wu_event_id,
+        "wh_event_id": app.wh_event_id,
     }
+
+
+def get_dashboard_application(application_id: int | None = None) -> GpsGateApplication:
+    if application_id:
+        app = db.session.get(GpsGateApplication, application_id)
+        if not app:
+            raise RuntimeError(f"No gpsgate_application row found for application_id={application_id}")
+        return app
+
+    applications = load_applications()
+    if not applications:
+        raise RuntimeError("No gpsgate_application rows found for dashboard/manual trigger")
+
+    app = applications[0]
+    logger.warning(
+        f"Dashboard/manual trigger defaulted to application_id={app.application_id} because no application was specified"
+    )
+    return app
+
+# ------------------------------------------------------------------
+# API ENDPOINTS
+# ------------------------------------------------------------------
+
+@dashboard_bp.route('/customer-config', methods=['GET'])
+@login_required
+def list_customer_config():
+    """List current gpsgate_application rows with masked tokens."""
+    try:
+        applications = (
+            db.session.query(GpsGateApplication)
+            .order_by(GpsGateApplication.application_id.asc())
+            .all()
+        )
+        return jsonify({
+            'success': True,
+            'applications': [serialize_gpsgate_application(app) for app in applications]
+        })
+    except Exception as e:
+        logger.error(f"Failed to list gpsgate_application: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@dashboard_bp.route('/customer-config', methods=['POST'])
+@login_required
+def save_customer_config():
+    """Create or update gpsgate_application with application_id and token."""
+    try:
+        data = request.get_json() or {}
+        application_id = int(data.get('application_id', '').strip() or 0)
+        token = str(data.get('token', '')).strip()
+        name_fields = {
+            'tag_name': str(data.get('tag_name', '')).strip() or None,
+            'trip_report_name': str(data.get('trip_report_name', '')).strip() or None,
+            'event_report_name': str(data.get('event_report_name', '')).strip() or None,
+            'speed_event_rule_name': str(data.get('speed_event_rule_name', '')).strip() or None,
+            'idle_event_rule_name': str(data.get('idle_event_rule_name', '')).strip() or None,
+            'awh_event_rule_name': str(data.get('awh_event_rule_name', '')).strip() or None,
+            'ha_event_rule_name': str(data.get('ha_event_rule_name', '')).strip() or None,
+            'hb_event_rule_name': str(data.get('hb_event_rule_name', '')).strip() or None,
+            'hc_event_rule_name': str(data.get('hc_event_rule_name', '')).strip() or None,
+            'wu_event_rule_name': str(data.get('wu_event_rule_name', '')).strip() or None,
+            'wh_event_rule_name': str(data.get('wh_event_rule_name', '')).strip() or None,
+        }
+        id_fields = {
+            'tag_id': str(data.get('tag_id', '')).strip() or None,
+            'trip_report_id': str(data.get('trip_report_id', '')).strip() or None,
+            'event_report_id': str(data.get('event_report_id', '')).strip() or None,
+            'speed_event_id': str(data.get('speed_event_id', '')).strip() or None,
+            'idle_event_id': str(data.get('idle_event_id', '')).strip() or None,
+            'awh_event_id': str(data.get('awh_event_id', '')).strip() or None,
+            'ha_event_id': str(data.get('ha_event_id', '')).strip() or None,
+            'hb_event_id': str(data.get('hb_event_id', '')).strip() or None,
+            'hc_event_id': str(data.get('hc_event_id', '')).strip() or None,
+            'wu_event_id': str(data.get('wu_event_id', '')).strip() or None,
+            'wh_event_id': str(data.get('wh_event_id', '')).strip() or None,
+        }
+
+        if not application_id or not token:
+            return jsonify({
+                'success': False,
+                'error': 'application_id and token are required'
+            }), 400
+
+        app = db.session.get(GpsGateApplication, application_id)
+        created = app is None
+        if app is None:
+            app = GpsGateApplication(application_id=application_id)
+            db.session.add(app)
+
+        app.token = token
+
+        for field_name, new_value in name_fields.items():
+            setattr(app, field_name, new_value)
+
+        for id_field, new_id in id_fields.items():
+            setattr(app, id_field, new_id)
+
+        db.session.commit()
+
+        has_unfilled_ids = any(
+            name_fields[field_name]
+            and not getattr(app, NAME_TO_ID_FIELD_MAP.get(field_name, ''), None)
+            for field_name in name_fields
+        )
+        message = f"GpsGate application {'created' if created else 'updated'} for application_id={application_id}."
+        if has_unfilled_ids:
+            message += " Run Dimension Sync to populate missing report, tag, and event IDs."
+
+        return jsonify({
+            'success': True,
+            'message': message,
+            'application': serialize_gpsgate_application(app)
+        }), 201 if created else 200
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Failed to save gpsgate_application: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 NAME_TO_ID_FIELD_MAP = {
@@ -87,125 +211,6 @@ NAME_TO_ID_FIELD_MAP = {
     "wu_event_rule_name": "wu_event_id",
     "wh_event_rule_name": "wh_event_id",
 }
-
-ID_FIELDS = tuple(NAME_TO_ID_FIELD_MAP.values())
-
-
-def get_dashboard_customer(application_id: str | None = None) -> CustomerConfig:
-    if application_id:
-        customer = db.session.get(CustomerConfig, str(application_id))
-        if not customer:
-            raise RuntimeError(f"No customer_config row found for application_id={application_id}")
-        return customer
-
-    customers = load_customers()
-    if not customers:
-        raise RuntimeError("No customer_config rows found for dashboard/manual trigger")
-
-    customer = customers[0]
-    logger.warning(
-        f"Dashboard/manual trigger defaulted to application_id={customer.application_id} because no customer was specified"
-    )
-    return customer
-
-# ------------------------------------------------------------------
-# API ENDPOINTS
-# ------------------------------------------------------------------
-
-@dashboard_bp.route('/customer-config', methods=['GET'])
-@login_required
-def list_customer_config():
-    """List current customer_config rows with masked tokens."""
-    try:
-        customers = (
-            db.session.query(CustomerConfig)
-            .order_by(CustomerConfig.application_id.asc())
-            .all()
-        )
-        return jsonify({
-            'success': True,
-            'customers': [serialize_customer_config(customer) for customer in customers]
-        })
-    except Exception as e:
-        logger.error(f"Failed to list customer_config: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
-@dashboard_bp.route('/customer-config', methods=['POST'])
-@login_required
-def save_customer_config():
-    """Create or update customer_config with application_id and token."""
-    try:
-        data = request.get_json() or {}
-        application_id = str(data.get('application_id', '')).strip()
-        token = str(data.get('token', '')).strip()
-        name_fields = {
-            field_name: str(data.get(field_name, '')).strip() or None
-            for field_name in NAME_TO_ID_FIELD_MAP
-            if field_name in data
-        }
-        id_fields = {
-            field_name: str(data.get(field_name, '')).strip() or None
-            for field_name in ID_FIELDS
-            if field_name in data
-        }
-
-        if not application_id or not token:
-            return jsonify({
-                'success': False,
-                'error': 'application_id and token are required'
-            }), 400
-
-        customer = db.session.get(CustomerConfig, application_id)
-        created = customer is None
-        if customer is None:
-            customer = CustomerConfig(application_id=application_id)
-            db.session.add(customer)
-
-        customer.token = token
-
-        changed_name_fields = []
-        for field_name, new_value in name_fields.items():
-            old_value = getattr(customer, field_name)
-            if old_value != new_value:
-                changed_name_fields.append(field_name)
-                setattr(customer, field_name, new_value)
-
-        for id_field, new_id in id_fields.items():
-            setattr(customer, id_field, new_id)
-
-        for field_name in changed_name_fields:
-            id_field = NAME_TO_ID_FIELD_MAP[field_name]
-            if id_field not in id_fields:
-                setattr(customer, id_field, None)
-
-        db.session.commit()
-
-        has_unfilled_ids = any(
-            field_name in name_fields
-            and name_fields[field_name]
-            and not getattr(customer, NAME_TO_ID_FIELD_MAP[field_name])
-            for field_name in NAME_TO_ID_FIELD_MAP
-        )
-        message = f"Customer config {'created' if created else 'updated'} for application_id={application_id}."
-        if has_unfilled_ids:
-            message += " Run Dimension Sync to populate missing report, tag, and event IDs."
-
-        return jsonify({
-            'success': True,
-            'message': message,
-            'customer': serialize_customer_config(customer)
-        }), 201 if created else 200
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Failed to save customer_config: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
 
 
 @dashboard_bp.route('/eligible-applications', methods=['GET'])
@@ -702,18 +707,18 @@ def cleanup_data():
 
         logger.info(f"ADMIN CLEANUP COMPLETED: Total deleted={total_deleted}, operations={len(operations)}, errors={len(errors)} for application_id={application_id}, table_type={table_type}")
 
-        # Delete the customer_config record completely
-        logger.info(f"ADMIN CLEANUP: Deleting customer_config for application_id={application_id}")
+        # Delete the gpsgate_application record completely
+        logger.info(f"ADMIN CLEANUP: Deleting gpsgate_application for application_id={application_id}")
         try:
             with db.session.begin():
-                customer = db.session.get(CustomerConfig, application_id)
-                if customer:
-                    db.session.delete(customer)
-                    operations.append("Deleted customer_config record")
+                app = db.session.get(GpsGateApplication, application_id_int)
+                if app:
+                    db.session.delete(app)
+                    operations.append("Deleted gpsgate_application record")
                 else:
-                    operations.append("No customer_config found to delete")
+                    operations.append("No gpsgate_application found to delete")
         except Exception as e:
-            errors.append(f"Failed to delete customer_config: {str(e)}")
+            errors.append(f"Failed to delete gpsgate_application: {str(e)}")
 
         if errors:
             logger.error(f"ADMIN CLEANUP FAILED: {len(errors)} errors occurred")
@@ -753,11 +758,11 @@ def dashboard_page():
 def check_gpsgate_server_health():
     """Quick health check for GpsGate server state"""
     try:
-        customers = load_customers()
-        if not customers:
-            return jsonify({'status': 'degraded', 'message': 'No customer_config rows found'}), 503
+        applications = load_applications()
+        if not applications:
+            return jsonify({'status': 'degraded', 'message': 'No gpsgate_application rows found'}), 503
 
-        runtime = get_event_runtime_config(customers[0], "WU", Config.BASE_URL)
+        runtime = get_event_runtime_config(applications[0], "WU", Config.BASE_URL)
         test_payload = {
             "app_id": runtime.app_id,
             "token": runtime.token,

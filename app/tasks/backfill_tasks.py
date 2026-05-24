@@ -1,23 +1,23 @@
 import logging
 
 from app.celery_app import celery
-from app.services.customer_config import EVENT_CONFIG, load_customers
+from app.services.customer_config import EVENT_CONFIG, load_applications
 from app.services.event_processor import iter_week_ranges, run_event_for_dates
 
 logger = logging.getLogger(__name__)
 
 
-def _get_customer(application_id):
+def _get_application(application_id):
     if application_id:
-        from app.models import CustomerConfig, db
-        customer = db.session.get(CustomerConfig, str(application_id))
-        if not customer:
-            raise RuntimeError(f"No customer_config for application_id={application_id}")
-        return customer
-    customers = load_customers()
-    if not customers:
-        raise RuntimeError("No rows in customer_config")
-    return customers[0]
+        from app.models import GpsGateApplication, db
+        app = db.session.get(GpsGateApplication, int(application_id))
+        if not app:
+            raise RuntimeError(f"No gpsgate_application for application_id={application_id}")
+        return app
+    applications = load_applications()
+    if not applications:
+        raise RuntimeError("No rows in gpsgate_application")
+    return applications[0]
 
 
 def _progress(self, done, total, status, **extra):
@@ -34,7 +34,7 @@ def _progress(self, done, total, status, **extra):
 
 @celery.task(bind=True, name="tasks.fact_sync", track_started=True)
 def fact_sync_task(self, start_date: str, end_date: str, application_id=None):
-    customer    = _get_customer(application_id)
+    app    = _get_application(application_id)
     event_types = list(EVENT_CONFIG.keys())
     week_ranges = list(iter_week_ranges(start_date, end_date))
     total_steps = len(week_ranges) * len(event_types)
@@ -62,7 +62,7 @@ def fact_sync_task(self, start_date: str, end_date: str, application_id=None):
                 inserted=total_inserted,
             )
             try:
-                result = run_event_for_dates(et, week_start, week_end, customer)
+                result = run_event_for_dates(et, week_start, week_end, app)
                 week_results[et] = result
                 ins  = result.get("inserted", 0)
                 skip = result.get("skipped",  0)
@@ -107,7 +107,7 @@ def fact_sync_task(self, start_date: str, end_date: str, application_id=None):
 
 @celery.task(bind=True, name="tasks.full_backfill", track_started=True)
 def full_backfill_task(self, start_date: str, end_date: str, application_id=None):
-    customer = _get_customer(application_id)
+    app = _get_application(application_id)
     event_types = list(EVENT_CONFIG.keys())
     week_ranges = list(iter_week_ranges(start_date, end_date))
     total_steps = 1 + len(week_ranges) * len(event_types)  # +1 for dim sync
@@ -138,7 +138,7 @@ def full_backfill_task(self, start_date: str, end_date: str, application_id=None
                 inserted=total_inserted,
             )
             try:
-                result = run_event_for_dates(et, week_start, week_end, customer)
+                result = run_event_for_dates(et, week_start, week_end, app)
                 week_results[et] = result
                 total_inserted += result.get("inserted", 0)
                 total_skipped  += result.get("skipped", 0)

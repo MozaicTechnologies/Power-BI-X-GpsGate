@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 
 from app.celery_app import celery
-from app.services.customer_config import EVENT_CONFIG, load_customers
+from app.services.customer_config import EVENT_CONFIG, load_applications
 from app.services.event_processor import run_event_for_dates
 
 
@@ -53,25 +53,25 @@ def daily_sync_task(self):
     except Exception:
         dim_records = 0
 
-    customers = load_customers()
+    customers = load_applications()
     event_types = list(EVENT_CONFIG.keys())
     total_steps = len(customers) * len(event_types)
     done = 0
     total_inserted = total_skipped = total_failed = 0
     results = {}
 
-    for customer in customers:
+    for app in customers:
         app_results = {}
         for et in event_types:
             _progress(
                 self, done, total_steps,
-                f"Processing {et} / app={customer.application_id}",
+                f"Processing {et} / app={app.application_id}",
                 event_type=et,
-                customer=str(customer.application_id),
+                customer=str(app.application_id),
                 inserted=total_inserted,
             )
             try:
-                result = run_event_for_dates(et, start_date, end_date, customer)
+                result = run_event_for_dates(et, start_date, end_date, app)
                 app_results[et] = {"status": "success", **result}
                 total_inserted += result.get("inserted", 0)
                 total_skipped  += result.get("skipped", 0)
@@ -80,7 +80,7 @@ def daily_sync_task(self):
                 app_results[et] = {"status": "failed", "error": str(exc)}
                 total_failed += 1
             done += 1
-        results[str(customer.application_id)] = app_results
+        results[str(app.application_id)] = app_results
 
     return {
         "status": "completed",
@@ -105,25 +105,25 @@ def weekly_backfill_task(self):
     start_str = start_date.strftime("%Y-%m-%d")
     end_str = end_date.strftime("%Y-%m-%d")
 
-    customers = load_customers()
+    customers = load_applications()
     event_types = list(EVENT_CONFIG.keys())
     total_steps = len(customers) * len(event_types)
     done = 0
     total_inserted = total_skipped = total_failed = 0
     results = {}
 
-    for customer in customers:
+    for app in customers:
         app_results = {}
         for et in event_types:
             _progress(
                 self, done, total_steps,
-                f"Processing {et} / app={customer.application_id}",
+                f"Processing {et} / app={app.application_id}",
                 event_type=et,
-                customer=str(customer.application_id),
+                customer=str(app.application_id),
                 inserted=total_inserted,
             )
             try:
-                result = run_event_for_dates(et, start_str, end_str, customer)
+                result = run_event_for_dates(et, start_str, end_str, app)
                 app_results[et] = {"status": "success", **result}
                 total_inserted += result.get("inserted", 0)
                 total_skipped  += result.get("skipped", 0)
@@ -132,7 +132,7 @@ def weekly_backfill_task(self):
                 app_results[et] = {"status": "failed", "error": str(exc)}
                 total_failed += 1
             done += 1
-        results[str(customer.application_id)] = app_results
+        results[str(app.application_id)] = app_results
 
     return {
         "status": "completed",

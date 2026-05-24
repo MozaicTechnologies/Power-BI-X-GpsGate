@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Sync dimension tables from GpsGate API and refresh customer_config IDs."""
+"""Sync dimension tables from GpsGate API and refresh gpsgate_application IDs."""
 
 from __future__ import annotations
 
@@ -75,23 +75,23 @@ def _norm_expr(col):
 # Config loading
 # ---------------------------------------------------------------------------
 
-def load_customer_configs(session, only_application_id: str | None = None) -> list[dict]:
-    from app.models import CustomerConfig
+def load_gpsgate_applications(session, only_application_id: int | None = None) -> list[dict]:
+    from app.models import GpsGateApplication
 
-    q = session.query(CustomerConfig).order_by(CustomerConfig.application_id)
+    q = session.query(GpsGateApplication).order_by(GpsGateApplication.application_id)
     if only_application_id:
-        q = q.filter(CustomerConfig.application_id == str(only_application_id))
+        q = q.filter(GpsGateApplication.application_id == only_application_id)
 
     rows = q.all()
     if not rows:
         if only_application_id:
-            raise RuntimeError(f"No customer_config row found for application_id={only_application_id}")
-        raise RuntimeError("No customer_config rows found")
+            raise RuntimeError(f"No gpsgate_application row found for application_id={only_application_id}")
+        raise RuntimeError("No gpsgate_application rows found")
 
     configs = []
     for row in rows:
         config = {
-            "application_id": int(row.application_id),
+            "application_id": row.application_id,
             "token": normalize_token(row.token),
         }
         for field in NAME_LOOKUP_FIELDS:
@@ -99,6 +99,10 @@ def load_customer_configs(session, only_application_id: str | None = None) -> li
             config[field] = (val or "").strip() or None
         configs.append(config)
     return configs
+
+
+# Keep old function name as alias for backwards compatibility
+load_customer_configs = load_gpsgate_applications
 
 
 # ---------------------------------------------------------------------------
@@ -140,48 +144,48 @@ def lookup_report_ids(session, application_id: int, report_names_to_columns: dic
 
 
 # ---------------------------------------------------------------------------
-# customer_config update
+# gpsgate_application update
 # ---------------------------------------------------------------------------
 
-def update_customer_config_from_dims(session, customer_config: dict) -> None:
-    from app.models import CustomerConfig, DimEventRules
+def update_gpsgate_application_from_dims(session, gpsgate_application: dict) -> None:
+    from app.models import GpsGateApplication, DimEventRules
 
-    application_id = customer_config["application_id"]
+    application_id = gpsgate_application["application_id"]
 
     report_ids = lookup_report_ids(session, application_id, {
-        customer_config["trip_report_name"]:  "trip_report_id",
-        customer_config["event_report_name"]: "event_report_id",
+        gpsgate_application["trip_report_name"]:  "trip_report_id",
+        gpsgate_application["event_report_name"]: "event_report_id",
     })
     event_rule_ids = lookup_named_ids(
         session,
         model=DimEventRules,
         application_id=application_id,
-        names_to_columns={customer_config[f]: id_f for f, id_f in EVENT_RULE_NAME_TO_ID_FIELD.items()},
+        names_to_columns={gpsgate_application[f]: id_f for f, id_f in EVENT_RULE_NAME_TO_ID_FIELD.items()},
     )
 
     updates: dict = {}
     missing: list[str] = []
 
-    if customer_config.get("tag_name"):
-        tag_id = lookup_tag_id(session, application_id, customer_config["tag_name"])
+    if gpsgate_application.get("tag_name"):
+        tag_id = lookup_tag_id(session, application_id, gpsgate_application["tag_name"])
         updates["tag_id"] = tag_id
         if tag_id is None:
             missing.append("tag_id")
 
-    if customer_config.get("trip_report_name"):
+    if gpsgate_application.get("trip_report_name"):
         v = report_ids.get("trip_report_id")
         updates["trip_report_id"] = v
         if v is None:
             missing.append("trip_report_id")
 
-    if customer_config.get("event_report_name"):
+    if gpsgate_application.get("event_report_name"):
         v = report_ids.get("event_report_id")
         updates["event_report_id"] = v
         if v is None:
             missing.append("event_report_id")
 
     for name_field, id_field in EVENT_RULE_NAME_TO_ID_FIELD.items():
-        if not customer_config.get(name_field):
+        if not gpsgate_application.get(name_field):
             continue
         v = event_rule_ids.get(id_field)
         updates[id_field] = v
@@ -189,17 +193,21 @@ def update_customer_config_from_dims(session, customer_config: dict) -> None:
             missing.append(id_field)
 
     if not updates:
-        log(f"customer_config for app {application_id} has no mapping names configured", "WARN")
+        log(f"gpsgate_application for app {application_id} has no mapping names configured", "WARN")
         return
 
-    session.query(CustomerConfig).filter(
-        CustomerConfig.application_id == str(application_id)
+    session.query(GpsGateApplication).filter(
+        GpsGateApplication.application_id == application_id
     ).update(updates)
 
     if missing:
-        log(f"customer_config updated for app {application_id} — missing: {', '.join(sorted(missing))}", "WARN")
+        log(f"gpsgate_application updated for app {application_id} — missing: {', '.join(sorted(missing))}", "WARN")
     else:
-        log(f"customer_config updated for app {application_id}")
+        log(f"gpsgate_application updated for app {application_id}")
+
+
+# Keep old function name as alias for backwards compatibility
+update_customer_config_from_dims = update_gpsgate_application_from_dims
 
 
 # ---------------------------------------------------------------------------

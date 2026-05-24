@@ -10,7 +10,7 @@ from .models import (
     FactHA,
     FactHB,
     FactWU,
-    CustomerConfig,
+    GpsGateApplication,
     DimTags,
     DimEventRules,
     DimReports,

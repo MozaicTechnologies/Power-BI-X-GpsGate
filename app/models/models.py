@@ -7,6 +7,45 @@ def _utcnow():
 db = SQLAlchemy()
 
 # ------------------------------------------------------------------
+# GPSGATE APPLICATION (replaces CustomerConfig)
+# ------------------------------------------------------------------
+
+class GpsGateApplication(db.Model):
+    """GpsGate application mapping."""
+    __tablename__ = "gpsgate_application"
+
+    id = db.Column(db.Integer, primary_key=True)
+    application_id = db.Column(db.Integer, nullable=False, unique=True)
+    token = db.Column(db.Text, nullable=False)
+    tag_name = db.Column(db.String(255))
+    trip_report_name = db.Column(db.String(255))
+    event_report_name = db.Column(db.String(255))
+    speed_event_rule_name = db.Column(db.String(255))
+    idle_event_rule_name = db.Column(db.String(255))
+    awh_event_rule_name = db.Column(db.String(255))
+    ha_event_rule_name = db.Column(db.String(255))
+    hb_event_rule_name = db.Column(db.String(255))
+    hc_event_rule_name = db.Column(db.String(255))
+    wu_event_rule_name = db.Column(db.String(255))
+    wh_event_rule_name = db.Column(db.String(255))
+    tag_id = db.Column(db.String(50))
+
+    trip_report_id = db.Column(db.String(50))
+    event_report_id = db.Column(db.String(50))
+
+    awh_event_id = db.Column(db.String(50))
+    ha_event_id = db.Column(db.String(50))
+    hb_event_id = db.Column(db.String(50))
+    hc_event_id = db.Column(db.String(50))
+    wu_event_id = db.Column(db.String(50))
+    wh_event_id = db.Column(db.String(50))
+    speed_event_id = db.Column(db.String(50))
+    idle_event_id = db.Column(db.String(50))
+
+    created_at = db.Column(db.DateTime, default=_utcnow)
+
+
+# ------------------------------------------------------------------
 # RENDER / RESULT
 # ------------------------------------------------------------------
 
@@ -15,6 +54,12 @@ class Render(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     app_id = db.Column(db.String(100), nullable=False)
+    gpsgate_application_id = db.Column(
+        db.Integer,
+        db.ForeignKey("gpsgate_application.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
     period_start = db.Column(db.String(50), nullable=False)
     period_end = db.Column(db.String(50), nullable=False)
     tag_id = db.Column(db.String(100))
@@ -29,6 +74,12 @@ class Result(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     app_id = db.Column(db.String(100), nullable=False)
+    gpsgate_application_id = db.Column(
+        db.Integer,
+        db.ForeignKey("gpsgate_application.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
     report_id = db.Column(db.String(100), nullable=False)
     render_id = db.Column(db.String(100), unique=True, nullable=False)
     filepath = db.Column(db.String(255))
@@ -36,6 +87,7 @@ class Result(db.Model):
     gdrive_link = db.Column(db.String(1024))
     uploaded_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=_utcnow)
+
 
 # ------------------------------------------------------------------
 # FACT TABLES (NO MIXIN – EXPLICIT IS SAFER)
@@ -46,6 +98,12 @@ class FactTrip(db.Model):
 
     id = db.Column(db.BigInteger, primary_key=True)
     app_id = db.Column(db.String(50), nullable=False)
+    gpsgate_application_id = db.Column(
+        db.Integer,
+        db.ForeignKey("gpsgate_application.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
     tag_id = db.Column(db.String(50), nullable=False)
 
     event_date = db.Column(db.DateTime, nullable=False)
@@ -77,6 +135,12 @@ class FactSpeeding(db.Model):
 
     id = db.Column(db.BigInteger, primary_key=True)
     app_id = db.Column(db.String(50), nullable=False)
+    gpsgate_application_id = db.Column(
+        db.Integer,
+        db.ForeignKey("gpsgate_application.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
     tag_id = db.Column(db.String(50), nullable=False)
 
     event_date = db.Column(db.Date, nullable=False)
@@ -109,6 +173,12 @@ class FactIdle(db.Model):
 
     id = db.Column(db.BigInteger, primary_key=True)
     app_id = db.Column(db.String(50), nullable=False)
+    gpsgate_application_id = db.Column(
+        db.Integer,
+        db.ForeignKey("gpsgate_application.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
     tag_id = db.Column(db.String(50), nullable=False)
 
     event_date = db.Column(db.Date, nullable=False)
@@ -140,6 +210,12 @@ class FactAWH(db.Model):
 
     id = db.Column(db.BigInteger, primary_key=True)
     app_id = db.Column(db.String(50), nullable=False)
+    gpsgate_application_id = db.Column(
+        db.Integer,
+        db.ForeignKey("gpsgate_application.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
     tag_id = db.Column(db.String(50), nullable=False)
 
     event_date = db.Column(db.Date, nullable=False)
@@ -167,6 +243,12 @@ class FactWH(db.Model):
 
     id          = db.Column(db.Integer, primary_key=True, autoincrement=True)
     app_id      = db.Column(db.String(100), nullable=False)
+    gpsgate_application_id = db.Column(
+        db.Integer,
+        db.ForeignKey("gpsgate_application.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
     tag_id      = db.Column(db.String(100), nullable=False)
 
     event_date  = db.Column(db.Date, nullable=False)
@@ -201,6 +283,12 @@ class FactHA(db.Model):
 
     id = db.Column(db.BigInteger, primary_key=True)
     app_id = db.Column(db.String(50), nullable=False)
+    gpsgate_application_id = db.Column(
+        db.Integer,
+        db.ForeignKey("gpsgate_application.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
     tag_id = db.Column(db.String(50), nullable=False)
 
     event_date = db.Column(db.Date, nullable=False)
@@ -234,6 +322,12 @@ class FactWU(db.Model):
 
     id = db.Column(db.BigInteger, primary_key=True)
     app_id = db.Column(db.String(50), nullable=False)
+    gpsgate_application_id = db.Column(
+        db.Integer,
+        db.ForeignKey("gpsgate_application.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
     tag_id = db.Column(db.String(50), nullable=False)
 
     event_date = db.Column(db.Date, nullable=False)
@@ -258,39 +352,9 @@ class FactWU(db.Model):
     )
 
 
-class CustomerConfig(db.Model):
-    """Per-application customer configuration for dynamic report and event IDs."""
-    __tablename__ = "customer_config"
-
-    application_id = db.Column(db.String(50), primary_key=True)
-    token = db.Column(db.Text, nullable=False)
-    tag_name = db.Column(db.String(255))
-    trip_report_name = db.Column(db.String(255))
-    event_report_name = db.Column(db.String(255))
-    speed_event_rule_name = db.Column(db.String(255))
-    idle_event_rule_name = db.Column(db.String(255))
-    awh_event_rule_name = db.Column(db.String(255))
-    ha_event_rule_name = db.Column(db.String(255))
-    hb_event_rule_name = db.Column(db.String(255))
-    hc_event_rule_name = db.Column(db.String(255))
-    wu_event_rule_name = db.Column(db.String(255))
-    wh_event_rule_name = db.Column(db.String(255))
-    tag_id = db.Column(db.String(50))
-
-    trip_report_id = db.Column(db.String(50))
-    event_report_id = db.Column(db.String(50))
-
-    awh_event_id = db.Column(db.String(50))
-    ha_event_id = db.Column(db.String(50))
-    hb_event_id = db.Column(db.String(50))
-    hc_event_id = db.Column(db.String(50))
-    wu_event_id = db.Column(db.String(50))
-    wh_event_id = db.Column(db.String(50))
-    speed_event_id = db.Column(db.String(50))
-    idle_event_id = db.Column(db.String(50))
-
-
-# Dimension Tables (created by sync_dimensions_from_api.py)
+# ------------------------------------------------------------------
+# DIMENSION TABLES (created by sync_dimensions_from_api.py)
+# ------------------------------------------------------------------
 
 class DimTags(db.Model):
     """Dimension table for tags/groups"""
