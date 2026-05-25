@@ -49,7 +49,7 @@ def _to_dt(df, col):
 # Change 1: vectorized record building (itertuples >> iterrows)
 # ---------------------------------------------------------------------------
 
-def _build_records(df, app_id, tag_id, event_name, now):
+def _build_records(df, app_id, tag_id, event_name, now, gpsgate_application_id):
     """
     Build a list of insert-ready dicts using vectorized pandas ops + itertuples.
     itertuples is ~50x faster than iterrows for large DataFrames.
@@ -89,20 +89,21 @@ def _build_records(df, app_id, tag_id, event_name, now):
 
         records = [
             {
-                "app_id":       app_id,
-                "tag_id":       tag_id,
-                "event_date":   r.v_start,
-                "start_time":   r.v_start.time(),
-                "stop_time":    _safe(r.v_stop),
-                "vehicle":      r.v_vehicle,
-                "address":      r.v_addr  or None,
-                "duration":     r.v_dur   or None,
-                "duration_s":   _safe(r.v_dur_s,  int),
-                "distance_gps": _safe(r.v_dist,   float),
-                "max_speed":    _safe(r.v_maxspd, float),
-                "avg_speed":    _safe(r.v_avgspd, float),
-                "event_state":  r.v_state or None,
-                "created_at":   now,
+                "app_id":                  app_id,
+                "gpsgate_application_id":  gpsgate_application_id,
+                "tag_id":                  tag_id,
+                "event_date":              r.v_start,
+                "start_time":              r.v_start.time(),
+                "stop_time":               _safe(r.v_stop),
+                "vehicle":                 r.v_vehicle,
+                "address":                 r.v_addr  or None,
+                "duration":                r.v_dur   or None,
+                "duration_s":              _safe(r.v_dur_s,  int),
+                "distance_gps":            _safe(r.v_dist,   float),
+                "max_speed":               _safe(r.v_maxspd, float),
+                "avg_speed":               _safe(r.v_avgspd, float),
+                "event_state":             r.v_state or None,
+                "created_at":              now,
             }
             for r in df.itertuples(index=False)
         ]
@@ -136,8 +137,9 @@ def _build_records(df, app_id, tag_id, event_name, now):
     records = []
     for r in df.itertuples(index=False):
         rec = {
-            "app_id":     app_id,
-            "tag_id":     tag_id,
+            "app_id":                 app_id,
+            "gpsgate_application_id": gpsgate_application_id,
+            "tag_id":                 tag_id,
             "event_date": r.v_date.date(),
             "start_time": r.v_time.time(),
             "vehicle":    r.v_vehicle,
@@ -198,7 +200,7 @@ def _chunked_insert(records, model, invalid_rows_skipped, event_name):
 # Public API
 # ---------------------------------------------------------------------------
 
-def store_event_data_to_db(df, app_id, tag_id, event_name):
+def store_event_data_to_db(df, app_id, tag_id, event_name, gpsgate_application_id):
     logger.info(f"[DB_STORAGE] {event_name} rows={len(df)} chunk_size={CHUNK_SIZE}")
 
     if df is None or df.empty:
@@ -226,7 +228,7 @@ def store_event_data_to_db(df, app_id, tag_id, event_name):
         }
 
     now = datetime.utcnow()
-    records, invalid_rows_skipped = _build_records(df, app_id, tag_id, event_name, now)
+    records, invalid_rows_skipped = _build_records(df, app_id, tag_id, event_name, now, gpsgate_application_id)
 
     logger.info(
         f"[DB_STORAGE] {event_name} valid={len(records)} "

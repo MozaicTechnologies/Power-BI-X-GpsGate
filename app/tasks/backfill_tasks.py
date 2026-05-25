@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 def _get_application(application_id):
     if application_id:
         from app.models import GpsGateApplication, db
-        app = db.session.get(GpsGateApplication, int(application_id))
+        app = GpsGateApplication.query.filter_by(application_id=int(application_id)).first()
         if not app:
             raise RuntimeError(f"No gpsgate_application for application_id={application_id}")
         return app

@@ -77,7 +77,7 @@ def serialize_gpsgate_application(app: GpsGateApplication) -> dict:
 
 def get_dashboard_application(application_id: int | None = None) -> GpsGateApplication:
     if application_id:
-        app = db.session.get(GpsGateApplication, application_id)
+        app = GpsGateApplication.query.filter_by(application_id=application_id).first()
         if not app:
             raise RuntimeError(f"No gpsgate_application row found for application_id={application_id}")
         return app
@@ -159,7 +159,7 @@ def save_customer_config():
                 'error': 'application_id and token are required'
             }), 400
 
-        app = db.session.get(GpsGateApplication, application_id)
+        app = GpsGateApplication.query.filter_by(application_id=application_id).first()
         created = app is None
         if app is None:
             app = GpsGateApplication(application_id=application_id)
@@ -607,6 +607,14 @@ def cleanup_data():
                 'error': 'application_id must be a valid integer'
             }), 400
 
+        gpsgate_app = GpsGateApplication.query.filter_by(application_id=application_id_int).first()
+        if not gpsgate_app:
+            return jsonify({
+                'success': False,
+                'error': f'No gpsgate_application found for application_id={application_id}'
+            }), 404
+        gpsgate_pk_id = gpsgate_app.id
+
         # Validate table type
         if table_type not in ['fact', 'dimension', 'both']:
             logger.warning(f"ADMIN CLEANUP FAILED: Invalid table_type={table_type}")
@@ -642,11 +650,11 @@ def cleanup_data():
 
                     with db.session.begin():
                         # Count records before deletion
-                        count_before = model_class.query.filter_by(app_id=application_id).count()
-                        logger.info(f"ADMIN CLEANUP: Found {count_before} records in {display_name} for app_id={application_id}")
+                        count_before = model_class.query.filter_by(gpsgate_application_id=gpsgate_pk_id).count()
+                        logger.info(f"ADMIN CLEANUP: Found {count_before} records in {display_name} for application_id={application_id}")
 
                         # Delete records
-                        deleted = model_class.query.filter_by(app_id=application_id).delete()
+                        deleted = model_class.query.filter_by(gpsgate_application_id=gpsgate_pk_id).delete()
                         total_deleted += deleted
 
                         logger.info(f"ADMIN CLEANUP: Deleted {deleted} records from {display_name} (app_id={application_id})")
@@ -711,9 +719,9 @@ def cleanup_data():
         logger.info(f"ADMIN CLEANUP: Deleting gpsgate_application for application_id={application_id}")
         try:
             with db.session.begin():
-                app = db.session.get(GpsGateApplication, application_id_int)
-                if app:
-                    db.session.delete(app)
+                app_to_delete = GpsGateApplication.query.filter_by(application_id=application_id_int).first()
+                if app_to_delete:
+                    db.session.delete(app_to_delete)
                     operations.append("Deleted gpsgate_application record")
                 else:
                     operations.append("No gpsgate_application found to delete")

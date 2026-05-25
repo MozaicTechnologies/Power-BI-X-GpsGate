@@ -17,7 +17,7 @@ import os
 import io
 from app.utils.logger import setup_logger
 
-from app.models import db, Render, Result
+from app.models import db, Render, Result, GpsGateApplication
 from app.services.db_storage import store_event_data_to_db
 
 logger = setup_logger("DATA_PIPELINE")
@@ -226,6 +226,12 @@ def process_event_data(event_name, response_key):
         logger.error("Missing required parameters")
         return jsonify({"error": "Missing required parameters"}), 400
 
+    gpsgate_app = GpsGateApplication.query.filter_by(application_id=int(app_id or 0)).first()
+    if not gpsgate_app:
+        logger.error(f"No gpsgate_application found for app_id={app_id}")
+        return jsonify({"error": f"No gpsgate_application found for app_id={app_id}"}), 404
+    gpsgate_application_id = gpsgate_app.id
+
     weeks = resolve_weeks(data, 1)
     totals = {"raw": 0, "inserted": 0, "skipped": 0, "failed": 0}
     weeks_processed = 0
@@ -246,7 +252,7 @@ def process_event_data(event_name, response_key):
                 
                 # ---------------- RENDER ----------------
                 render = Render.query.filter_by(
-                    app_id=str(app_id),
+                    gpsgate_application_id=gpsgate_application_id,
                     period_start=week["week_start"],
                     period_end=week["week_end"],
                     tag_id=str(tag_id),
@@ -377,7 +383,7 @@ def process_event_data(event_name, response_key):
             totals["raw"] += len(raw_df)
 
             # ---------------- STORE ----------------
-            stats = store_event_data_to_db(raw_df, app_id, tag_id, event_name)
+            stats = store_event_data_to_db(raw_df, app_id, tag_id, event_name, gpsgate_application_id)
             totals["inserted"] += stats["inserted"]
             totals["skipped"] += stats["skipped"]
             totals["failed"] += stats["failed"]
