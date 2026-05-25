@@ -312,6 +312,7 @@ def process_event_data(event_name, response_key):
             if successful_report_id and not render:
                 new_render = Render(
                     app_id=str(app_id),
+                    gpsgate_application_id=gpsgate_application_id,
                     period_start=week["week_start"],
                     period_end=week["week_end"],
                     tag_id=str(tag_id),
