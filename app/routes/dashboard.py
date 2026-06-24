@@ -760,6 +760,77 @@ def dashboard_page():
     return render_template('dashboard.html')
 
 
+_BROWSE_TABLE_MAP = {
+    'gpsgate_application':       GpsGateApplication,
+    'fact_trip':                 FactTrip,
+    'fact_speeding':             FactSpeeding,
+    'fact_idle':                 FactIdle,
+    'fact_awh':                  FactAWH,
+    'fact_wh':                   FactWH,
+    'fact_ha':                   FactHA,
+    'fact_hb':                   FactHB,
+    'fact_wu':                   FactWU,
+    'dim_tags':                  DimTags,
+    'dim_event_rules':           DimEventRules,
+    'dim_reports':               DimReports,
+    'dim_vehicles':              DimVehicles,
+    'dim_drivers':               DimDrivers,
+    'dim_vehicle_custom_fields': DimVehicleCustomFields,
+}
+
+
+@dashboard_bp.route('/browse', methods=['GET'])
+@login_required
+def list_browse_tables():
+    """Return all browseable tables with their row counts."""
+    tables = []
+    for name, model in _BROWSE_TABLE_MAP.items():
+        try:
+            count = db.session.query(func.count()).select_from(model).scalar() or 0
+        except Exception:
+            db.session.rollback()
+            count = -1
+        tables.append({'name': name, 'count': count})
+    return jsonify({'success': True, 'tables': tables})
+
+
+@dashboard_bp.route('/browse/<table_name>', methods=['GET'])
+@login_required
+def browse_table(table_name):
+    """Return paginated rows from any registered table."""
+    model = _BROWSE_TABLE_MAP.get(table_name)
+    if not model:
+        return jsonify({'success': False, 'error': f'Unknown table: {table_name}'}), 404
+
+    page     = max(1, request.args.get('page', 1, type=int))
+    per_page = min(100, max(10, request.args.get('per_page', 50, type=int)))
+
+    try:
+        total  = db.session.query(func.count()).select_from(model).scalar() or 0
+        db_rows = db.session.query(model).offset((page - 1) * per_page).limit(per_page).all()
+        columns = [c.name for c in model.__table__.columns]
+        rows = []
+        for row in db_rows:
+            r = {}
+            for col in columns:
+                val = getattr(row, col, None)
+                r[col] = str(val) if val is not None else None
+            rows.append(r)
+        return jsonify({
+            'success':  True,
+            'table':    table_name,
+            'total':    total,
+            'page':     page,
+            'per_page': per_page,
+            'pages':    max(1, (total + per_page - 1) // per_page),
+            'columns':  columns,
+            'rows':     rows,
+        })
+    except Exception:
+        db.session.rollback()
+        logger.exception("browse_table | table=%s", table_name)
+        return jsonify({'success': False, 'error': 'Query failed'}), 500
+
 
 @dashboard_bp.route('/health/gpsgate-server', methods=['GET'])
 @login_required

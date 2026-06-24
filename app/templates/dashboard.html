@@ -7,6 +7,23 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
 </head>
 <body>
+    <!-- Hamburger button -->
+    <button class="hamburger-btn" onclick="toggleSidebar()" title="Browse Database">☰</button>
+
+    <!-- Sidebar overlay -->
+    <div id="db-sidebar-overlay" onclick="closeSidebar()"></div>
+
+    <!-- Sidebar panel -->
+    <div id="db-sidebar">
+        <div id="db-sidebar-header">
+            <span>🗄️ Database Browser</span>
+            <button onclick="closeSidebar()">✕</button>
+        </div>
+        <div id="db-sidebar-body">
+            <p style="padding:10px;color:#888;font-size:0.85rem;">Click ☰ to load tables</p>
+        </div>
+    </div>
+
     <div class="container">
         <h1>🚀 GpsGate Data Pipeline Dashboard</h1>
         
@@ -326,8 +343,35 @@
         </div>
     </div>
 
+    <!-- DB Browser Modal -->
+    <div id="db-browser-modal">
+        <div id="db-browser-inner">
+            <div id="db-browser-header">
+                <span id="db-browser-title">table</span>
+                <input id="db-browser-search" type="text" placeholder="🔍 Filter current page…" oninput="browserSearch()">
+                <select id="db-browser-per-page" onchange="browserPerPageChange()">
+                    <option value="25">25 rows</option>
+                    <option value="50" selected>50 rows</option>
+                    <option value="100">100 rows</option>
+                </select>
+                <button id="db-browser-close-btn" onclick="closeBrowser()">✕</button>
+            </div>
+            <div id="db-browser-table-wrap">
+                <table id="db-browser-table">
+                    <thead id="db-browser-thead"></thead>
+                    <tbody id="db-browser-tbody"></tbody>
+                </table>
+            </div>
+            <div id="db-browser-footer">
+                <span id="db-browser-status"></span>
+                <div id="db-browser-pagination"></div>
+            </div>
+        </div>
+    </div>
+
     <script src="{{ url_for('static', filename='js/customer-config.js') }}"></script>
     <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
     <script src="{{ url_for('static', filename='js/cleanup.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/db-browser.js') }}"></script>
 </body>
 </html>

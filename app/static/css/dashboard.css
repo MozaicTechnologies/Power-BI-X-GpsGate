@@ -218,3 +218,246 @@ button:disabled {
     color: #0c5460;
     border: 1px solid #bee5eb;
 }
+
+/* ── Hamburger button ──────────────────────────────────────────────────────── */
+.hamburger-btn {
+    position: fixed;
+    top: 18px;
+    left: 18px;
+    z-index: 3000;
+    background: rgba(255,255,255,0.2);
+    border: 2px solid rgba(255,255,255,0.5);
+    color: white;
+    width: 46px;
+    height: 46px;
+    border-radius: 10px;
+    font-size: 1.4rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(6px);
+    transition: background 0.2s, transform 0.2s;
+    padding: 0;
+    width: 46px;
+}
+.hamburger-btn:hover {
+    background: rgba(255,255,255,0.35);
+    transform: scale(1.05);
+}
+
+/* ── Sidebar overlay ───────────────────────────────────────────────────────── */
+#db-sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 3500;
+}
+#db-sidebar-overlay.open { display: block; }
+
+/* ── Sidebar panel ─────────────────────────────────────────────────────────── */
+#db-sidebar {
+    position: fixed;
+    top: 0;
+    left: -320px;
+    width: 300px;
+    height: 100vh;
+    background: #1e1e2e;
+    z-index: 4000;
+    transition: left 0.28s cubic-bezier(.4,0,.2,1);
+    display: flex;
+    flex-direction: column;
+    box-shadow: 4px 0 24px rgba(0,0,0,0.4);
+}
+#db-sidebar.open { left: 0; }
+
+#db-sidebar-header {
+    padding: 18px 20px;
+    background: linear-gradient(135deg,#667eea,#764ba2);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 1rem;
+    font-weight: 700;
+}
+#db-sidebar-header button {
+    width: auto;
+    padding: 4px 10px;
+    background: rgba(255,255,255,0.2);
+    border: none;
+    color: white;
+    border-radius: 6px;
+    font-size: 1.1rem;
+    cursor: pointer;
+}
+#db-sidebar-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px 0;
+}
+.db-sidebar-group { margin-bottom: 6px; }
+.db-sidebar-group-label {
+    padding: 8px 16px 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+}
+.db-sidebar-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 9px 16px;
+    cursor: pointer;
+    transition: background 0.15s;
+    color: #cdd6f4;
+    font-size: 0.88rem;
+}
+.db-sidebar-item:hover { background: rgba(102,126,234,0.25); color: white; }
+.db-sidebar-table-name { font-family: monospace; }
+.db-sidebar-count {
+    font-size: 0.78rem;
+    background: rgba(255,255,255,0.1);
+    padding: 2px 7px;
+    border-radius: 10px;
+    color: #aaa;
+    min-width: 40px;
+    text-align: right;
+}
+
+/* ── DB Browser modal ──────────────────────────────────────────────────────── */
+#db-browser-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 5000;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+#db-browser-inner {
+    background: white;
+    border-radius: 14px;
+    width: 100%;
+    max-width: 1200px;
+    height: 90vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+}
+#db-browser-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px 20px;
+    background: linear-gradient(135deg,#667eea,#764ba2);
+    color: white;
+    flex-shrink: 0;
+}
+#db-browser-title {
+    font-family: monospace;
+    font-size: 1.1rem;
+    font-weight: 700;
+    flex: 1;
+}
+#db-browser-search {
+    width: 220px;
+    padding: 7px 12px;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    background: rgba(255,255,255,0.18);
+    color: white;
+    outline: none;
+}
+#db-browser-search::placeholder { color: rgba(255,255,255,0.6); }
+#db-browser-per-page {
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.88rem;
+    background: rgba(255,255,255,0.18);
+    color: white;
+    cursor: pointer;
+}
+#db-browser-per-page option { color: #333; background: white; }
+#db-browser-close-btn {
+    background: rgba(255,255,255,0.2);
+    border: none;
+    color: white;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    font-size: 1.1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+#db-browser-table-wrap {
+    flex: 1;
+    overflow: auto;
+}
+#db-browser-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.84rem;
+}
+#db-browser-table th {
+    position: sticky;
+    top: 0;
+    background: #f0f2ff;
+    padding: 10px 12px;
+    text-align: left;
+    font-weight: 700;
+    color: #667eea;
+    border-bottom: 2px solid #ddd;
+    white-space: nowrap;
+    font-family: monospace;
+    font-size: 0.8rem;
+}
+#db-browser-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid #f0f0f0;
+    color: #333;
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: monospace;
+    font-size: 0.82rem;
+}
+#db-browser-table tr:hover td { background: #f8f9ff; }
+#db-browser-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    border-top: 1px solid #eee;
+    flex-shrink: 0;
+    gap: 10px;
+}
+#db-browser-status { font-size: 0.82rem; color: #888; }
+#db-browser-pagination { display: flex; gap: 4px; flex-wrap: wrap; }
+.db-page-btn {
+    width: auto;
+    min-width: 36px;
+    padding: 5px 10px;
+    font-size: 0.82rem;
+    border-radius: 6px;
+    background: #f0f2ff;
+    color: #667eea;
+    border: 1px solid #dde;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.15s;
+}
+.db-page-btn:hover { background: #667eea; color: white; }
+.db-page-btn.active { background: #667eea; color: white; border-color: #667eea; }
+.db-page-ellipsis { padding: 5px 4px; color: #aaa; font-size: 0.82rem; line-height: 2; }
