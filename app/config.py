@@ -1,32 +1,30 @@
 
 import os
+import logging
 from celery.schedules import crontab
+
+_log = logging.getLogger("CONFIG")
+
 
 class Config:
 
     SECRET_KEY = os.getenv("SECRET_KEY")
 
-    # Get DATABASE_URL from environment (required)
     raw_url = os.getenv("DATABASE_URL")
-    
+
     if not raw_url:
-        print("[ERROR] DATABASE_URL environment variable is not set!")
-        print("[ERROR] Please set DATABASE_URL in Render environment variables")
-        print("[ERROR] Using fallback SQLite for local development...")
-        # Fallback for local development only
+        _log.warning("DATABASE_URL is not set — falling back to SQLite for local development")
         raw_url = "sqlite:////tmp/render.db"
-    
-    # Normalize ANY postgres-y URL to SQLAlchemy+psycopg format:
-    #  - postgres://...         -> postgresql+psycopg://...
-    #  - postgresql://...       -> postgresql+psycopg://...
+
+    # Normalize postgres:// and postgresql:// to SQLAlchemy+psycopg driver format
     if raw_url.startswith("postgres://"):
         raw_url = raw_url.replace("postgres://", "postgresql+psycopg://", 1)
     elif raw_url.startswith("postgresql://") and not raw_url.startswith("postgresql+psycopg://"):
         raw_url = raw_url.replace("postgresql://", "postgresql+psycopg://", 1)
-    
+
     SQLALCHEMY_DATABASE_URI = raw_url
-    print(f"[CONFIG] Using PostgreSQL: {raw_url[:50]}...")
-    
+    _log.info("Database driver configured: %s", raw_url.split("://")[0] if "://" in raw_url else "unknown")
+
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_POOL_SIZE = 10       # base connections kept open
     SQLALCHEMY_MAX_OVERFLOW = 10    # extra connections allowed under load
@@ -57,14 +55,12 @@ class Config:
             },
         },
     }
-    
+
     # GpsGate API settings
     TOKEN = os.getenv("TOKEN")
     BASE_URL = os.getenv("BASE_URL", "https://omantracking2.com")
-    
-    # Debug TOKEN (masked for security)
+
     if TOKEN:
-        token_preview = f"{TOKEN[:10]}...{TOKEN[-10:]}" if len(TOKEN) > 20 else "SHORT_TOKEN"
-        print(f"[CONFIG] TOKEN: {token_preview} (length: {len(TOKEN)})")
+        _log.info("GpsGate TOKEN is configured (length=%d)", len(TOKEN))
     else:
-        print(f"[CONFIG] TOKEN: NOT SET!")
+        _log.warning("GpsGate TOKEN env var is not set")

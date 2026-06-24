@@ -1,8 +1,12 @@
+import time
 from datetime import datetime, timedelta
 
 from app.celery_app import celery
 from app.services.customer_config import EVENT_CONFIG, load_applications
 from app.services.event_processor import run_event_for_dates
+from app.utils.logger import setup_logger
+
+logger = setup_logger("TASKS")
 
 
 def _progress(self, done, total, status, **extra):
@@ -19,6 +23,7 @@ def _progress(self, done, total, status, **extra):
 
 @celery.task(bind=True, name="tasks.dimension_sync", track_started=True)
 def dimension_sync_task(self, application_id=None):
+    logger.info("[dim_sync] STARTED | task_id=%s | app=%s", self.request.id, application_id or "all")
     self.update_state(state="PROGRESS", meta={"percent": 0, "status": "Starting dimension sync…"})
 
     from app.services.sync_dimensions import main as sync_main
@@ -33,6 +38,8 @@ def dimension_sync_task(self, application_id=None):
 
     total = sync_main(application_id, on_progress=on_progress) or 0
 
+    logger.info("[dim_sync] DONE | task_id=%s | app=%s | records=%d",
+                self.request.id, application_id or "all", total)
     return {"status": "completed", "records": total}
 
 
@@ -42,15 +49,19 @@ def dimension_sync_task(self, application_id=None):
 
 @celery.task(bind=True, name="tasks.daily_sync", track_started=True)
 def daily_sync_task(self):
+    t0 = time.time()
     today = datetime.utcnow().date()
     start_date = end_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
 
+    logger.info("[daily_sync] STARTED | task_id=%s | date=%s", self.request.id, start_date)
     _progress(self, 0, 1, f"Syncing dimensions for {start_date}")
 
     try:
         from app.services.sync_dimensions import main as sync_dimensions
         dim_records = sync_dimensions() or 0
+        logger.info("[daily_sync] DIM_SYNC DONE | date=%s | records=%d", start_date, dim_records)
     except Exception:
+        logger.exception("[daily_sync] DIM_SYNC FAILED | date=%s", start_date)
         dim_records = 0
 
     customers = load_applications()
@@ -59,6 +70,9 @@ def daily_sync_task(self):
     done = 0
     total_inserted = total_skipped = total_failed = 0
     results = {}
+
+    logger.info("[daily_sync] FACT_SYNC START | date=%s | apps=%d | events=%d | total_steps=%d",
+                start_date, len(customers), len(event_types), total_steps)
 
     for app in customers:
         app_results = {}
@@ -72,15 +86,30 @@ def daily_sync_task(self):
             )
             try:
                 result = run_event_for_dates(et, start_date, end_date, app)
+                ins  = result.get("inserted", 0)
+                skip = result.get("skipped",  0)
+                fail = result.get("failed",   0)
                 app_results[et] = {"status": "success", **result}
-                total_inserted += result.get("inserted", 0)
-                total_skipped  += result.get("skipped", 0)
-                total_failed   += result.get("failed", 0)
+                total_inserted += ins
+                total_skipped  += skip
+                total_failed   += fail
+                logger.info("[daily_sync] EVENT OK | app=%s | event=%s | date=%s | inserted=%d skipped=%d failed=%d",
+                            app.application_id, et, start_date, ins, skip, fail)
             except Exception as exc:
                 app_results[et] = {"status": "failed", "error": str(exc)}
                 total_failed += 1
+                logger.exception("[daily_sync] EVENT FAIL | app=%s | event=%s | date=%s",
+                                 app.application_id, et, start_date)
             done += 1
         results[str(app.application_id)] = app_results
+
+    elapsed = time.time() - t0
+    logger.info(
+        "[daily_sync] DONE | task_id=%s | date=%s | dim_records=%d | "
+        "inserted=%d skipped=%d failed=%d | elapsed=%.1fs",
+        self.request.id, start_date, dim_records,
+        total_inserted, total_skipped, total_failed, elapsed,
+    )
 
     return {
         "status": "completed",
@@ -99,6 +128,7 @@ def daily_sync_task(self):
 
 @celery.task(bind=True, name="tasks.weekly_backfill", track_started=True)
 def weekly_backfill_task(self):
+    t0 = time.time()
     today = datetime.utcnow().date()
     end_date = today - timedelta(days=1)
     start_date = end_date - timedelta(days=6)
@@ -112,6 +142,11 @@ def weekly_backfill_task(self):
     total_inserted = total_skipped = total_failed = 0
     results = {}
 
+    logger.info(
+        "[weekly_backfill] STARTED | task_id=%s | range=%s→%s | apps=%d | events=%d | total_steps=%d",
+        self.request.id, start_str, end_str, len(customers), len(event_types), total_steps,
+    )
+
     for app in customers:
         app_results = {}
         for et in event_types:
@@ -124,15 +159,32 @@ def weekly_backfill_task(self):
             )
             try:
                 result = run_event_for_dates(et, start_str, end_str, app)
+                ins  = result.get("inserted", 0)
+                skip = result.get("skipped",  0)
+                fail = result.get("failed",   0)
                 app_results[et] = {"status": "success", **result}
-                total_inserted += result.get("inserted", 0)
-                total_skipped  += result.get("skipped", 0)
-                total_failed   += result.get("failed", 0)
+                total_inserted += ins
+                total_skipped  += skip
+                total_failed   += fail
+                logger.info(
+                    "[weekly_backfill] EVENT OK | app=%s | event=%s | range=%s→%s | inserted=%d skipped=%d failed=%d",
+                    app.application_id, et, start_str, end_str, ins, skip, fail,
+                )
             except Exception as exc:
                 app_results[et] = {"status": "failed", "error": str(exc)}
                 total_failed += 1
+                logger.exception("[weekly_backfill] EVENT FAIL | app=%s | event=%s | range=%s→%s",
+                                 app.application_id, et, start_str, end_str)
             done += 1
         results[str(app.application_id)] = app_results
+
+    elapsed = time.time() - t0
+    logger.info(
+        "[weekly_backfill] DONE | task_id=%s | range=%s→%s | "
+        "inserted=%d skipped=%d failed=%d | elapsed=%.1fs",
+        self.request.id, start_str, end_str,
+        total_inserted, total_skipped, total_failed, elapsed,
+    )
 
     return {
         "status": "completed",

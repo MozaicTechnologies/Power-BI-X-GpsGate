@@ -15,7 +15,11 @@ from dotenv import load_dotenv
 from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert  # type: ignore[import]
 
+from app.utils.logger import setup_logger
+
 load_dotenv()
+
+logger = setup_logger("SYNC_DIM")
 
 BASE_URL = os.getenv("BASE_URL", "https://omantracking2.com")
 
@@ -43,11 +47,6 @@ EVENT_RULE_NAME_TO_ID_FIELD = {
     "wu_event_rule_name":    "wu_event_id",
     "wh_event_rule_name":    "wh_event_id",
 }
-
-
-def log(msg: str, level: str = "INFO") -> None:
-    ts = datetime.now().strftime("%H:%M:%S")
-    print(f"[{ts}] [{level}] {msg}", flush=True)
 
 
 def normalize_lookup_name(value: str | None) -> str:
@@ -193,7 +192,7 @@ def update_gpsgate_application_from_dims(session, gpsgate_application: dict) -> 
             missing.append(id_field)
 
     if not updates:
-        log(f"gpsgate_application for app {application_id} has no mapping names configured", "WARN")
+        logger.warning("update_app_from_dims | no mapping names configured | app=%s", application_id)
         return
 
     session.query(GpsGateApplication).filter(
@@ -201,9 +200,10 @@ def update_gpsgate_application_from_dims(session, gpsgate_application: dict) -> 
     ).update(updates)
 
     if missing:
-        log(f"gpsgate_application updated for app {application_id} — missing: {', '.join(sorted(missing))}", "WARN")
+        logger.warning("update_app_from_dims | DONE | app=%s | missing_ids=%s",
+                       application_id, ", ".join(sorted(missing)))
     else:
-        log(f"gpsgate_application updated for app {application_id}")
+        logger.info("update_app_from_dims | DONE | app=%s | all IDs resolved", application_id)
 
 
 # Keep old function name as alias for backwards compatibility
@@ -227,7 +227,7 @@ def call_api(*, method="GET", base_url, path, token, params=None, json_payload=N
         except Exception:
             if attempt == retries:
                 raise
-            log(f"Retry {attempt}/{retries} -> {path}", "WARN")
+            logger.warning("call_api | RETRY %d/%d path=%s", attempt, retries, path)
             time.sleep(2)
 
 
@@ -238,46 +238,46 @@ def call_api(*, method="GET", base_url, path, token, params=None, json_payload=N
 def sync_tags(session, application_id: int, auth_token: str) -> int:
     from app.models import DimTags
 
-    log(f"Syncing dim_tags for app {application_id}")
+    logger.info("sync_tags | START | app=%s", application_id)
     data = call_api(base_url=BASE_URL, path=f"comGpsGate/api/v.1/applications/{application_id}/tags", token=auth_token) or []
     rows = [{"id": int(r["id"]), "application_id": application_id, "name": r["name"]} for r in data]
     if rows:
         stmt = pg_insert(DimTags).values(rows)
         session.execute(stmt.on_conflict_do_update(index_elements=["id", "application_id"], set_={"name": stmt.excluded.name}))
-    log(f"dim_tags ok {len(rows)} for app {application_id}")
+    logger.info("sync_tags | DONE | app=%s rows=%d", application_id, len(rows))
     return len(rows)
 
 
 def sync_event_rules(session, application_id: int, auth_token: str) -> int:
     from app.models import DimEventRules
 
-    log(f"Syncing dim_event_rules for app {application_id}")
+    logger.info("sync_event_rules | START | app=%s", application_id)
     data = call_api(base_url=BASE_URL, path=f"comGpsGate/api/v.1/applications/{application_id}/eventrules", token=auth_token) or []
     rows = [{"id": int(r["id"]), "application_id": application_id, "name": r["name"]} for r in data]
     if rows:
         stmt = pg_insert(DimEventRules).values(rows)
         session.execute(stmt.on_conflict_do_update(index_elements=["id", "application_id"], set_={"name": stmt.excluded.name}))
-    log(f"dim_event_rules ok {len(rows)} for app {application_id}")
+    logger.info("sync_event_rules | DONE | app=%s rows=%d", application_id, len(rows))
     return len(rows)
 
 
 def sync_reports(session, application_id: int, auth_token: str) -> int:
     from app.models import DimReports
 
-    log(f"Syncing dim_reports for app {application_id}")
+    logger.info("sync_reports | START | app=%s", application_id)
     data = call_api(base_url=BASE_URL, path=f"comGpsGate/api/v.1/applications/{application_id}/reports", token=auth_token) or []
     rows = [{"id": int(r["id"]), "application_id": application_id, "name": r["name"]} for r in data]
     if rows:
         stmt = pg_insert(DimReports).values(rows)
         session.execute(stmt.on_conflict_do_update(index_elements=["id", "application_id"], set_={"name": stmt.excluded.name}))
-    log(f"dim_reports ok {len(rows)} for app {application_id}")
+    logger.info("sync_reports | DONE | app=%s rows=%d", application_id, len(rows))
     return len(rows)
 
 
 def sync_vehicles_and_drivers(session, application_id: int, auth_token: str) -> int:
     from app.models import DimVehicles, DimDrivers
 
-    log(f"Syncing dim_vehicles + dim_drivers for app {application_id}")
+    logger.info("sync_vehicles_and_drivers | START | app=%s", application_id)
     users = call_api(base_url=BASE_URL, path=f"comGpsGate/api/v.1/applications/{application_id}/users", token=auth_token, timeout=60)
 
     vehicle_rows = []
@@ -285,7 +285,8 @@ def sync_vehicles_and_drivers(session, application_id: int, auth_token: str) -> 
 
     for idx, user in enumerate(users, start=1):
         if idx % 50 == 0:
-            log(f"Users processed for app {application_id}: {idx}/{len(users)}")
+            logger.debug("sync_vehicles_and_drivers | PROGRESS | app=%s users=%d/%d",
+                         application_id, idx, len(users))
 
         track_point = user.get("trackPoint") or {}
         position    = track_point.get("position") or {}
@@ -326,15 +327,15 @@ def sync_vehicles_and_drivers(session, application_id: int, auth_token: str) -> 
             set_={c: getattr(stmt.excluded, c) for c in ("name", "username", "driver_id", "device_name", "imei", "latitude", "longitude", "utc", "validity")},
         ))
 
-    log(f"dim_vehicles ok {len(vehicle_rows)} for app {application_id}")
-    log(f"dim_drivers ok {len(driver_rows)} for app {application_id}")
+    logger.info("sync_vehicles_and_drivers | DONE | app=%s vehicles=%d drivers=%d",
+                application_id, len(vehicle_rows), len(driver_rows))
     return len(vehicle_rows) + len(driver_rows)
 
 
 def sync_vehicle_custom_fields(session, application_id: int, auth_token: str, on_progress=None) -> int:
     from app.models import DimVehicleCustomFields
 
-    log(f"Syncing dim_vehicle_custom_fields for app {application_id}")
+    logger.info("sync_vehicle_custom_fields | START | app=%s", application_id)
     users = call_api(base_url=BASE_URL, path=f"comGpsGate/api/v.1/applications/{application_id}/users", token=auth_token, timeout=60)
 
     rows: list[dict] = []
@@ -356,13 +357,15 @@ def sync_vehicle_custom_fields(session, application_id: int, auth_token: str, on
         if not user_id:
             continue
         if idx % 25 == 0:
-            log(f"Custom fields progress for app {application_id}: {idx}/{len(users)}")
+            logger.debug("sync_vehicle_custom_fields | PROGRESS | app=%s users=%d/%d",
+                         application_id, idx, len(users))
             if on_progress:
                 on_progress(f"App {application_id} — Custom Fields {idx}/{len(users)}", idx, len(users))
         try:
             fields = call_api(base_url=BASE_URL, path=f"comGpsGate/api/v.1/applications/{application_id}/users/{user_id}/customfields", token=auth_token, timeout=30)
         except Exception:
             skipped += 1
+            logger.warning("sync_vehicle_custom_fields | USER_SKIP | app=%s user_id=%s", application_id, user_id)
             continue
         for field in fields:
             rows.append({"application_id": application_id, "vehicle_id": int(user_id), "field_name": field.get("name"), "field_value": str(field.get("value"))})
@@ -372,7 +375,8 @@ def sync_vehicle_custom_fields(session, application_id: int, auth_token: str, on
             rows.clear()
 
     _flush()
-    log(f"dim_vehicle_custom_fields ok {total_processed} for app {application_id} | skipped {skipped}")
+    logger.info("sync_vehicle_custom_fields | DONE | app=%s rows=%d skipped=%d",
+                application_id, total_processed, skipped)
     return total_processed
 
 
@@ -385,9 +389,9 @@ _N_STEPS = len(_STEPS)
 
 
 def _run_sync(session, only_application_id: str | None = None, on_progress=None) -> int:
-    log("Starting dimension sync")
-    start   = time.time()
-    total   = 0
+    t0 = time.time()
+    logger.info("_run_sync | START | app=%s", only_application_id or "all")
+    total = 0
 
     customers   = load_customer_configs(session, only_application_id)
     n_customers = len(customers)
@@ -406,7 +410,7 @@ def _run_sync(session, only_application_id: str | None = None, on_progress=None)
     for cust_idx, customer in enumerate(customers):
         app_id     = customer["application_id"]
         auth_token = customer["token"]
-        log(f"Starting customer dimension sync for app {app_id}")
+        logger.info("_run_sync | CUSTOMER_START | app=%s (%d/%d)", app_id, cust_idx + 1, n_customers)
 
         _report("Tags");                         total += sync_tags(session, app_id, auth_token);                                              session.commit(); done += 1
         _report("Event Rules");                  total += sync_event_rules(session, app_id, auth_token);                                       session.commit(); done += 1
@@ -420,7 +424,9 @@ def _run_sync(session, only_application_id: str | None = None, on_progress=None)
     if on_progress:
         on_progress("Completed", total_steps, total_steps, 100)
 
-    log(f"Completed in {round(time.time() - start, 2)}s — Total records: {total:,}")
+    elapsed = round(time.time() - t0, 2)
+    logger.info("_run_sync | DONE | app=%s total_records=%d elapsed=%.2fs",
+                only_application_id or "all", total, elapsed)
     return total
 
 

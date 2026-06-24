@@ -4,8 +4,10 @@ from urllib.parse import urljoin
 
 import requests
 from flask import Blueprint, request, jsonify
+from app.utils.logger import setup_logger
 
 render_bp = Blueprint("render", __name__)
+logger = setup_logger("RENDER")
 
 DEFAULT_TIMEOUT = 45
 
@@ -42,9 +44,7 @@ def _coerce_id(value):
 
 
 def _merge_parameters(report_parameters, period_start, period_end, tag_id=None, event_id=None):
-    """
-    Merge caller inputs into the report model's parameter payload.
-    """
+    """Merge caller inputs into the report model's parameter payload."""
     if not isinstance(report_parameters, list):
         report_parameters = []
 
@@ -88,16 +88,16 @@ def _merge_parameters(report_parameters, period_start, period_end, tag_id=None, 
 
     return merged
 
+
 @render_bp.route("/health")
 def health():
     return "ok"
+
 
 @render_bp.route("/render", methods=["POST"])
 def render_report():
     """Handle render requests using the report model's parameter schema."""
     payload = _payload_dict()
-
-    print(f"[RENDER] Received payload keys: {sorted(list(payload.keys()))}")
 
     base_url = (payload.get("base_url") or "").strip().rstrip("/")
     app_id = payload.get("app_id")
@@ -108,22 +108,29 @@ def render_report():
     tag_id = payload.get("tag_id")
     event_id = payload.get("event_id")
 
+    logger.debug("render_report | app_id=%s report_id=%s period=%s→%s tag_id=%s event_id=%s",
+                 app_id, report_id, period_start, period_end, tag_id, event_id)
+
     if not all([base_url, app_id, report_id, token, period_start, period_end]):
+        missing = [k for k, v in {
+            "base_url": base_url, "app_id": app_id, "report_id": report_id,
+            "token": bool(token), "period_start": period_start, "period_end": period_end,
+        }.items() if not v]
+        logger.warning("render_report | MISSING_FIELDS | app_id=%s missing=%s", app_id, missing)
         return jsonify({
             "ok": False,
             "error": "Missing required fields: base_url, app_id, report_id, token, period_start, period_end",
             "received": sorted(list(payload.keys()))
         }), 400
 
-    token_preview = f"{token[:10]}...{token[-10:]}" if len(token) > 20 else "SHORT_TOKEN"
-    print(f"[RENDER] Using token: {token_preview} (length: {len(token)})")
-
     report_url, renderings_url = _build_urls(str(base_url), str(app_id), str(report_id))
     headers = _headers(str(token))
 
+    logger.info("render_report | FETCH_MODEL | app_id=%s report_id=%s", app_id, report_id)
     try:
         report_resp = requests.get(report_url, headers=headers, timeout=(10, 30))
     except Exception as exc:
+        logger.exception("render_report | FETCH_MODEL_EXCEPTION | app_id=%s report_id=%s", app_id, report_id)
         return jsonify({
             "ok": False,
             "error": "Failed to read report model",
@@ -132,6 +139,8 @@ def render_report():
         }), 502
 
     if report_resp.status_code != 200:
+        logger.error("render_report | FETCH_MODEL_FAILED | app_id=%s report_id=%s status=%d",
+                     app_id, report_id, report_resp.status_code)
         return jsonify({
             "ok": False,
             "error": "Failed to read report model",
@@ -157,8 +166,8 @@ def render_report():
         "sendEmail": False,
     }
 
-    print(f"[RENDER] Posting to: {renderings_url}")
-    print(f"[RENDER] Body: {body}")
+    logger.info("render_report | POST_RENDERING | app_id=%s report_id=%s period=%s→%s params=%d",
+                app_id, report_id, period_start, period_end, len(merged_parameters))
 
     last_status = None
     last_body = None
@@ -174,9 +183,12 @@ def render_report():
             last_status = resp.status_code
             last_body = resp.text
 
-            print(f"[RENDER] Attempt {attempt}: Status {resp.status_code}")
+            logger.debug("render_report | attempt=%d status=%d app_id=%s report_id=%s",
+                         attempt, resp.status_code, app_id, report_id)
+
             if not resp.ok:
-                print(f"[RENDER] Error response: {resp.text[:500]}")
+                logger.warning("render_report | ATTEMPT_FAILED | attempt=%d status=%d app_id=%s report_id=%s body=%.300s",
+                               attempt, resp.status_code, app_id, report_id, resp.text)
 
             if resp.ok:
                 data = resp.json() if resp.text else {}
@@ -185,9 +197,8 @@ def render_report():
                     or data.get("renderingId")
                     or data.get("rendering_id")
                 )
-
-                print(f"[RENDER] Success! rendering_id={rendering_id}")
-
+                logger.info("render_report | SUCCESS | app_id=%s report_id=%s rendering_id=%s attempt=%d",
+                            app_id, report_id, rendering_id, attempt)
                 return jsonify({
                     "render_id": rendering_id,
                     "rendering_id": rendering_id,
@@ -204,11 +215,12 @@ def render_report():
 
         except Exception as e:
             last_body = str(e)
-            print(f"[RENDER] Attempt {attempt} exception: {e}")
+            logger.warning("render_report | ATTEMPT_EXCEPTION | attempt=%d app_id=%s: %s",
+                           attempt, app_id, e)
             time.sleep(1.5 * attempt)
 
-    print(f"[RENDER] Failed after retries. Status: {last_status}")
-    print(f"[RENDER] Response body: {last_body[:1000] if last_body else 'None'}")
+    logger.error("render_report | FAILED_ALL_RETRIES | app_id=%s report_id=%s last_status=%s",
+                 app_id, report_id, last_status)
     return jsonify({
         "ok": False,
         "error": "Render failed",

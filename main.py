@@ -5,7 +5,7 @@ from wsgi import app
 
 if __name__ == '__main__':
     app.run(
-        debug=False,
+        debug=True,
         use_reloader=False,
         host='0.0.0.0',
         port=5000,         # keep consistent with your pipeline calls

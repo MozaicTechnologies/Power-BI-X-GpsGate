@@ -10,6 +10,16 @@ Start beat scheduler:
 Start Flower:
     celery -A celery_worker flower --port=5555
 """
+import logging
+import sys
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    stream=sys.stdout,
+    force=True,
+)
+
 from dotenv import load_dotenv
 load_dotenv()
 

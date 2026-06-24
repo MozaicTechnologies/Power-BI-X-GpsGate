@@ -1,78 +1,70 @@
 import logging
 import coloredlogs
 import os
-from datetime import datetime
 import sys
+from datetime import datetime
 
-# Create logs directory if it doesn't exist
-logs_dir = "logs"
-if not os.path.exists(logs_dir):
-    os.makedirs(logs_dir)
+_FMT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
-# Configure file handler with UTF-8 encoding
-log_file = os.path.join(logs_dir, f'bot_{datetime.now().strftime("%Y%m%d")}.log')
-file_handler = logging.FileHandler(log_file, encoding="utf-8")
-file_handler.setLevel(logging.INFO)
-file_format = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-file_handler.setFormatter(file_format)
+_COLOR_LEVEL_STYLES = {
+    "debug":    {"color": "blue"},
+    "info":     {"color": "green"},
+    "warning":  {"color": "yellow", "bold": True},
+    "error":    {"color": "red", "bold": True},
+    "critical": {"color": "red", "bold": True, "background": "white"},
+}
+_COLOR_FIELD_STYLES = {
+    "asctime":   {"color": "cyan"},
+    "name":      {"color": "magenta"},
+    "levelname": {"color": "white", "bold": True},
+}
 
-# Configure console handler with UTF-8 encoding
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setLevel(logging.INFO)
-console_format = logging.Formatter(
-    "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-console_handler.setFormatter(console_format)
+_shared_file_handler: logging.FileHandler | None = None
+
+
+def _get_numeric_level(level: str | None = None) -> int:
+    name = (level or os.getenv("LOG_LEVEL", "INFO")).upper()
+    return getattr(logging, name, logging.INFO)
+
+
+def _get_file_handler() -> logging.FileHandler:
+    global _shared_file_handler
+    if _shared_file_handler is None:
+        logs_dir = "logs"
+        os.makedirs(logs_dir, exist_ok=True)
+        log_file = os.path.join(logs_dir, f"app_{datetime.now().strftime('%Y%m%d')}.log")
+        h = logging.FileHandler(log_file, encoding="utf-8")
+        h.setLevel(_get_numeric_level())
+        h.setFormatter(logging.Formatter(_FMT))
+        _shared_file_handler = h
+    return _shared_file_handler
 
 
 def setup_logger(name: str, level: str = None) -> logging.Logger:
-    """
-    Set up a logger with both console and file output
+    """Return a named logger with file + colored-console output.
 
-    Args:
-        name: Logger name (usually __name__ of the module)
-        level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL) - defaults to env LOG_LEVEL or INFO
-
-    Returns:
-        Configured logger instance
+    Safe to call multiple times — handlers are added only once per logger.
+    Set LOG_LEVEL env var to DEBUG/INFO/WARNING/ERROR to control verbosity.
     """
     logger = logging.getLogger(name)
+    if logger.handlers:
+        return logger
 
-    # Prevent adding handlers multiple times
-    if not logger.handlers:
-        # Get log level from parameter or environment
-        if level is None:
-            level = os.getenv('LOG_LEVEL', 'INFO').upper()
+    numeric_level = _get_numeric_level(level)
+    logger.setLevel(numeric_level)
+    logger.propagate = False  # prevent double-printing through root logger
 
-        numeric_level = getattr(logging, level, logging.INFO)
+    # All loggers share one daily file
+    logger.addHandler(_get_file_handler())
 
-        # Set the logger level
-        logger.setLevel(numeric_level)
-
-        # Set handler levels to match
-        file_handler.setLevel(numeric_level)
-        console_handler.setLevel(numeric_level)
-
-        logger.addHandler(file_handler)
-        logger.addHandler(console_handler)
-
-        # Configure coloredlogs with UTF-8 encoding
-        coloredlogs.install(
-            level=numeric_level,
-            logger=logger,
-            fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            level_styles={
-                "debug": {"color": "blue"},
-                "info": {"color": "green"},
-                "warning": {"color": "yellow", "bold": True},
-                "error": {"color": "red", "bold": True},
-                "critical": {"color": "red", "bold": True, "background": "white"},
-            },
-            field_styles={
-                "asctime": {"color": "cyan"},
-                "name": {"color": "magenta"},
-                "levelname": {"color": "white", "bold": True},
-            },
-        )
+    # Colored console output
+    coloredlogs.install(
+        level=numeric_level,
+        logger=logger,
+        fmt=_FMT,
+        level_styles=_COLOR_LEVEL_STYLES,
+        field_styles=_COLOR_FIELD_STYLES,
+        stream=sys.stdout,
+    )
 
     return logger

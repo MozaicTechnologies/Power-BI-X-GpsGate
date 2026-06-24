@@ -8,9 +8,11 @@ from datetime import datetime, timedelta
 import threading
 import subprocess
 import os
-import sys
+
+from app.utils.logger import setup_logger
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
+logger = setup_logger("API")
 
 # Track backfill operations
 backfill_operations = {}
@@ -20,21 +22,13 @@ backfill_operations = {}
 def manual_backfill():
     """
     Manual backfill endpoint - initiate data fetch for custom date range or weeks.
-    
+
     Request JSON:
     {
-        "weeks": 54,  # Optional: number of weeks to backfill (default 1)
-        "start_date": "2025-01-01",  # Optional: start date (YYYY-MM-DD)
-        "end_date": "2025-12-31",    # Optional: end date (YYYY-MM-DD)
-        "event_types": ["Trip", "Speeding", "Idle", "AWH", "WH", "HA", "HB", "WU"]  # Optional: specific event types
-    }
-    
-    Response:
-    {
-        "status": "started",
-        "operation_id": "unique-id",
-        "message": "Backfill started for X weeks",
-        "estimated_duration_minutes": 45
+        "weeks": 54,
+        "start_date": "2025-01-01",
+        "end_date": "2025-12-31",
+        "event_types": ["Trip", "Speeding", ...]
     }
     """
     try:
@@ -43,23 +37,22 @@ def manual_backfill():
         start_date = data.get('start_date')
         end_date = data.get('end_date')
         event_types = data.get('event_types')
-        
-        # Validate input
+
         if weeks < 1 or weeks > 54:
             return jsonify({
                 "status": "error",
                 "message": "weeks must be between 1 and 54"
             }), 400
-        
-        # Create unique operation ID
+
         operation_id = f"backfill_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        
-        # Prepare environment for backfill
+
         env = os.environ.copy()
         if event_types:
             env['BACKFILL_EVENT_TYPES'] = ','.join(event_types)
-        
-        # Start backfill in background thread
+
+        logger.info("manual_backfill | REQUEST | operation_id=%s weeks=%s start=%s end=%s event_types=%s",
+                    operation_id, weeks, start_date, end_date, event_types)
+
         def run_backfill():
             try:
                 backfill_operations[operation_id] = {
@@ -68,40 +61,48 @@ def manual_backfill():
                     'weeks': weeks,
                     'progress': 0
                 }
-                
-                # Execute backfill script
+
                 script_path = os.path.join(
                     os.path.dirname(__file__),
                     'backfill_direct_python.py'
                 )
-                
+
+                logger.info("manual_backfill | THREAD_START | operation_id=%s script=%s",
+                            operation_id, script_path)
+
                 result = subprocess.run(
                     ['python', script_path],
                     env=env,
                     capture_output=True,
                     text=True,
-                    timeout=7200  # 2 hour timeout
+                    timeout=7200
                 )
-                
-                backfill_operations[operation_id]['status'] = 'completed'
+
                 backfill_operations[operation_id]['end_time'] = datetime.now()
                 backfill_operations[operation_id]['output'] = result.stdout
-                
+
                 if result.returncode != 0:
                     backfill_operations[operation_id]['status'] = 'error'
                     backfill_operations[operation_id]['error'] = result.stderr
-                    
-            except Exception as e:
+                    logger.error("manual_backfill | SCRIPT_ERROR | operation_id=%s returncode=%d stderr=%.300s",
+                                 operation_id, result.returncode, result.stderr)
+                else:
+                    backfill_operations[operation_id]['status'] = 'completed'
+                    logger.info("manual_backfill | SCRIPT_SUCCESS | operation_id=%s returncode=%d",
+                                operation_id, result.returncode)
+
+            except subprocess.TimeoutExpired:
                 backfill_operations[operation_id]['status'] = 'error'
-                backfill_operations[operation_id]['error'] = str(e)
-        
-        # Start backfill thread
+                backfill_operations[operation_id]['error'] = 'Script timeout (2 hours)'
+                logger.error("manual_backfill | TIMEOUT | operation_id=%s", operation_id)
+            except Exception:
+                backfill_operations[operation_id]['status'] = 'error'
+                logger.exception("manual_backfill | EXCEPTION | operation_id=%s", operation_id)
+
         thread = threading.Thread(target=run_backfill, daemon=True)
         thread.start()
-        
-        # Estimate duration: ~1 minute per week
+
         estimated_minutes = weeks
-        
         return jsonify({
             "status": "started",
             "operation_id": operation_id,
@@ -110,11 +111,12 @@ def manual_backfill():
             "estimated_duration_minutes": estimated_minutes,
             "start_time": datetime.now().isoformat()
         }), 202
-        
-    except Exception as e:
+
+    except Exception:
+        logger.exception("manual_backfill | UNEXPECTED_ERROR")
         return jsonify({
             "status": "error",
-            "message": str(e)
+            "message": "Unexpected error"
         }), 500
 
 
@@ -126,7 +128,7 @@ def get_backfill_status(operation_id):
             "status": "error",
             "message": f"Operation {operation_id} not found"
         }), 404
-    
+
     op = backfill_operations[operation_id]
     response = {
         "operation_id": operation_id,
@@ -135,14 +137,14 @@ def get_backfill_status(operation_id):
         "start_time": op.get('start_time').isoformat() if op.get('start_time') else None,
         "end_time": op.get('end_time').isoformat() if op.get('end_time') else None,
     }
-    
+
     if op.get('status') == 'completed':
         response['output'] = op.get('output', '')
         response['duration_seconds'] = (op['end_time'] - op['start_time']).total_seconds()
-    
+
     if op.get('status') == 'error':
         response['error'] = op.get('error')
-    
+
     return jsonify(response), 200
 
 
@@ -157,7 +159,7 @@ def list_backfill_operations():
             "weeks": op.get('weeks'),
             "start_time": op.get('start_time').isoformat() if op.get('start_time') else None,
         })
-    
+
     return jsonify({
         "total_operations": len(operations),
         "operations": operations
@@ -166,89 +168,70 @@ def list_backfill_operations():
 
 @api_bp.route('/fetch-current', methods=['POST'])
 def fetch_current_data():
-    """
-    Fetch current week's data manually.
-    Useful for getting latest data without waiting for scheduled backfill.
-    """
+    """Fetch current week's data manually."""
     operation_id = f"current_week_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    
+
     try:
-        # Log to main thread stderr so it appears in Render logs
-        print(f"[FETCH-CURRENT] {operation_id} - Request received", file=sys.stderr, flush=True)
-        print(f"[FETCH-CURRENT] {operation_id} - Request received", flush=True)
-        
+        logger.info("fetch_current | REQUEST | operation_id=%s", operation_id)
+
         backfill_operations[operation_id] = {
             'status': 'running',
             'start_time': datetime.now(),
             'weeks': 1,
             'type': 'current_week'
         }
-        
-        print(f"[FETCH-CURRENT] {operation_id} - Operation created, starting background thread", file=sys.stderr, flush=True)
-        
+
         def run_current_fetch():
             try:
-                print(f"[FETCH-CURRENT] {operation_id} - Background thread started", file=sys.stderr, flush=True)
-                
                 script_path = os.path.join(os.path.dirname(__file__), 'backfill_direct_python.py')
-                print(f"[FETCH-CURRENT] {operation_id} - Script: {script_path}, exists: {os.path.exists(script_path)}", file=sys.stderr, flush=True)
-                
-                # Set environment variable to fetch current week
+                logger.info("fetch_current | THREAD_START | operation_id=%s script_exists=%s",
+                            operation_id, os.path.exists(script_path))
+
                 env = os.environ.copy()
                 env['FETCH_CURRENT_WEEK'] = 'true'
-                env['BACKFILL_MODE'] = 'true'  # Skip render/result calls for speed
-                
-                print(f"[FETCH-CURRENT] {operation_id} - Executing backfill script with BACKFILL_MODE=true...", file=sys.stderr, flush=True)
-                
-                # Always capture output
+                env['BACKFILL_MODE'] = 'true'
+
                 result = subprocess.run(
                     ['python', script_path],
                     env=env,
                     capture_output=True,
                     text=True,
-                    timeout=1800  # 30 min timeout
+                    timeout=1800
                 )
-                
-                # Write captured output to file
+
+                log_content = result.stdout + (f"\n--- STDERR ---\n{result.stderr}" if result.stderr else "")
+
                 log_file_path = os.path.join(os.path.dirname(__file__), f'backfill_log_{operation_id}.txt')
                 with open(log_file_path, 'w') as f:
-                    f.write(result.stdout)
-                    if result.stderr:
-                        f.write(f"\n--- STDERR ---\n{result.stderr}")
-                
-                log_content = result.stdout + (f"\n--- STDERR ---\n{result.stderr}" if result.stderr else "")
-                
-                # Print key results to stderr so they appear in Render
-                print(f"[FETCH-CURRENT] {operation_id} - Script completed with code: {result.returncode}", file=sys.stderr, flush=True)
-                print(f"[FETCH-CURRENT] {operation_id} - Output size: {len(log_content)} bytes", file=sys.stderr, flush=True)
-                
-                backfill_operations[operation_id]['status'] = 'completed'
+                    f.write(log_content)
+
                 backfill_operations[operation_id]['end_time'] = datetime.now()
                 backfill_operations[operation_id]['output'] = log_content
                 backfill_operations[operation_id]['log_file'] = log_file_path
-                
+
                 if result.returncode != 0:
                     backfill_operations[operation_id]['status'] = 'error'
                     backfill_operations[operation_id]['error'] = log_content[:500]
-                    print(f"[FETCH-CURRENT] {operation_id} - ERROR: {log_content[:300]}", file=sys.stderr, flush=True)
+                    logger.error("fetch_current | SCRIPT_ERROR | operation_id=%s returncode=%d output=%.300s",
+                                 operation_id, result.returncode, log_content)
                 else:
-                    print(f"[FETCH-CURRENT] {operation_id} - SUCCESS", file=sys.stderr, flush=True)
-                    
+                    backfill_operations[operation_id]['status'] = 'completed'
+                    logger.info("fetch_current | SCRIPT_SUCCESS | operation_id=%s returncode=%d output_bytes=%d",
+                                operation_id, result.returncode, len(log_content))
+
             except subprocess.TimeoutExpired:
                 backfill_operations[operation_id]['status'] = 'error'
                 backfill_operations[operation_id]['error'] = 'Script timeout (30 minutes)'
-                print(f"[FETCH-CURRENT] {operation_id} - TIMEOUT", file=sys.stderr, flush=True)
-            except Exception as e:
+                logger.error("fetch_current | TIMEOUT | operation_id=%s", operation_id)
+            except Exception:
                 backfill_operations[operation_id]['status'] = 'error'
-                backfill_operations[operation_id]['error'] = str(e)
-                print(f"[FETCH-CURRENT] {operation_id} - EXCEPTION: {type(e).__name__}: {str(e)}", file=sys.stderr, flush=True)
+                logger.exception("fetch_current | EXCEPTION | operation_id=%s", operation_id)
 
-        
         thread = threading.Thread(target=run_current_fetch, daemon=True)
         thread.start()
-        
-        print(f"[FETCH-CURRENT] {operation_id} - Responding with 202", file=sys.stderr, flush=True)
-        
+
+        logger.info("fetch_current | THREAD_LAUNCHED | operation_id=%s", operation_id)
+
         return jsonify({
             "status": "started",
             "operation_id": operation_id,
@@ -256,12 +239,12 @@ def fetch_current_data():
             "estimated_duration_minutes": 1,
             "start_time": datetime.now().isoformat()
         }), 202
-        
-    except Exception as e:
-        print(f"[FETCH-CURRENT] {operation_id} - MAIN ERROR: {type(e).__name__}: {str(e)}", file=sys.stderr, flush=True)
+
+    except Exception:
+        logger.exception("fetch_current | MAIN_ERROR | operation_id=%s", operation_id)
         return jsonify({
             "status": "error",
-            "message": str(e),
+            "message": "Unexpected error",
             "operation_id": operation_id
         }), 500
 
@@ -283,14 +266,14 @@ def fetch_current_status(operation_id):
         return jsonify({
             "error": f"Operation {operation_id} not found"
         }), 404
-    
+
     op = backfill_operations[operation_id]
     return jsonify({
         "operation_id": operation_id,
         "status": op.get('status', 'unknown'),
         "start_time": op.get('start_time').isoformat() if op.get('start_time') else None,
         "end_time": op.get('end_time').isoformat() if op.get('end_time') else None,
-        "output": op.get('output', '')[:2000],  # First 2000 chars
+        "output": op.get('output', '')[:2000],
         "error": op.get('error', ''),
         "type": op.get('type', 'unknown')
     }), 200

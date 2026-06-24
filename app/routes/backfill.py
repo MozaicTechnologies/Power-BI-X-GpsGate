@@ -3,12 +3,16 @@
 API endpoint for scheduled backfill (current week data)
 Can be called by external cron services, GitHub Actions, or Render background jobs
 """
-from flask import Blueprint, jsonify, request, render_template
+from flask import Blueprint, jsonify, request
 from datetime import datetime, timedelta
 import os
 import traceback as tb
 
+from app.utils.logger import setup_logger
+
 backfill_api = Blueprint('backfill_api', __name__, url_prefix='/api', template_folder='../templates')
+logger = setup_logger("BACKFILL")
+
 
 @backfill_api.route('/health', methods=['GET'])
 def health():
@@ -18,6 +22,7 @@ def health():
         'service': 'GPS Gate Data Pipeline',
         'timestamp': datetime.now().isoformat()
     })
+
 
 @backfill_api.route('/test', methods=['GET'])
 def test():
@@ -32,36 +37,40 @@ def test():
                 'timestamp': datetime.now().isoformat()
             }), 200
     except Exception as e:
+        logger.exception("test | ERROR")
         return jsonify({
             'success': False,
             'error': str(e),
             'traceback': tb.format_exc()
         }), 500
 
+
 @backfill_api.route('/init-db', methods=['GET', 'POST'])
 def init_db():
     """Initialize database schema - run migrations and create tables"""
+    logger.info("init_db | TRIGGERED method=%s", request.method)
     try:
         from app import db, create_app
         import os
-        
+
         app = create_app()
         with app.app_context():
-            # Try to run migrations if they exist
             migration_status = "Skipped (no migrations folder)"
             migrations_path = os.path.join(os.path.dirname(__file__), 'migrations')
-            
+
             if os.path.exists(migrations_path):
                 try:
                     from flask_migrate import upgrade
                     upgrade()
                     migration_status = "Migrations completed successfully"
+                    logger.info("init_db | migrations completed")
                 except Exception as mig_err:
                     migration_status = f"Migration skipped: {str(mig_err)[:100]}"
-            
-            # Always create all tables if not exist
+                    logger.warning("init_db | migration skipped: %s", mig_err)
+
             db.create_all()
-            
+            logger.info("init_db | tables created | migration_status=%s", migration_status)
+
             return jsonify({
                 'success': True,
                 'message': 'Database initialized successfully',
@@ -69,56 +78,39 @@ def init_db():
                 'tables_created': True,
                 'timestamp': datetime.now().isoformat()
             }), 200
-            
-    except Exception as e:
-        import traceback
+
+    except Exception:
+        logger.exception("init_db | FAILED")
         return jsonify({
             'success': False,
-            'error': str(e),
-            'traceback': traceback.format_exc()
+            'error': 'Database initialization failed',
+            'traceback': tb.format_exc()
         }), 500
+
 
 @backfill_api.route('/backfill/current-week', methods=['POST', 'GET'])
 def backfill_current_week():
-    """
-    Trigger backfill for current week data
-    
-    GET: Simple trigger (no auth required for development, add key-based auth for production)
-    POST: With optional week override
-    
-    Query/Body params:
-    - api_key: (optional) Authentication key
-    - week_offset: (optional) Days offset from today (0=current week, -7=last week)
-    
-    Returns:
-    {
-        "success": bool,
-        "week": "2025-01-13 to 2025-01-19",
-        "total_inserted": 12345,
-        "total_duplicates": 10,
-        "total_errors": 5,
-        "stats_by_type": {...}
-    }
-    """
-   
+    """Trigger backfill for current week data"""
+    logger.info("backfill_current_week | TRIGGERED method=%s", request.method)
     try:
         from app import create_app, db
         from app.services.backfill_helper import backfill_current_week
-        
+
         app = create_app()
         with app.app_context():
             result = backfill_current_week()
+            logger.info("backfill_current_week | DONE | success=%s", result.get('success'))
             return jsonify(result), 200
-    
-    except Exception as main_error:
+
+    except Exception:
+        logger.exception("backfill_current_week | FAILED")
         return jsonify({
             'success': False,
-            'error': str(main_error)[:500],
-            'error_type': type(main_error).__name__,
+            'error': 'Backfill failed',
+            'error_type': 'Exception',
             'timestamp': datetime.now().isoformat()
         }), 500
-            
-  
+
 
 @backfill_api.route('/backfill/status', methods=['GET'])
 def backfill_status():
@@ -126,8 +118,7 @@ def backfill_status():
     try:
         from app import db, create_app
         from app.models import FactTrip, FactSpeeding, FactIdle, FactAWH, FactWH, FactHA, FactHB, FactWU
-        
-        # Ensure we're in app context
+
         app = create_app()
         with app.app_context():
             tables = [
@@ -140,10 +131,10 @@ def backfill_status():
                 ('HB', FactHB),
                 ('WU', FactWU),
             ]
-            
+
             stats = {}
             total_records = 0
-            
+
             for name, model in tables:
                 try:
                     count = db.session.query(model).count()
@@ -154,20 +145,21 @@ def backfill_status():
                         'valid': count - duplicate_count
                     }
                     total_records += count
-                except Exception as table_error:
-                    stats[name] = {'error': str(table_error)}
-            
+                except Exception:
+                    logger.exception("backfill_status | table_error table=%s", name)
+                    stats[name] = {'error': 'query failed'}
+
             return jsonify({
                 'success': True,
                 'total_records': total_records,
                 'stats_by_type': stats,
                 'timestamp': datetime.now().isoformat()
             }), 200
-        
-    except Exception as e:
-        import traceback
+
+    except Exception:
+        logger.exception("backfill_status | FAILED")
         return jsonify({
             'success': False,
-            'error': str(e),
-            'traceback': traceback.format_exc()
+            'error': 'Status query failed',
+            'traceback': tb.format_exc()
         }), 500
