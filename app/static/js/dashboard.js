@@ -79,26 +79,27 @@ function getSelectedApplicationId() {
                     list.innerHTML = '<em style="color: #666;">Failed to load customer config</em>';
                     return;
                 }
-                if (!data.customers.length) {
+                const customers = data.applications || [];
+                if (!customers.length) {
                     list.innerHTML = '<em style="color: #666;">No customer_config rows yet</em>';
                     select.innerHTML = '<option value="">Select customer</option>';
                     cleanupSelect.innerHTML = '<option value="">Select customer</option>';
                     return;
                 }
-                const optionsHtml = data.customers.map(customer => `
+                const optionsHtml = customers.map(customer => `
                     <option value="${customer.application_id}">${getApplicationLabel(customer.application_id)}</option>
                 `).join('');
                 select.innerHTML = '<option value="">Select customer</option>' + optionsHtml;
                 cleanupSelect.innerHTML = '<option value="">Select customer</option>' + optionsHtml;
-                data.customers.forEach(c => {
+                customers.forEach(c => {
                     if (c.full_token) _customerTokenMap[String(c.application_id)] = c.full_token;
                 });
-                if (currentSelection && data.customers.some(customer => customer.application_id === currentSelection)) {
+                if (currentSelection && customers.some(customer => customer.application_id === currentSelection)) {
                     select.value = currentSelection;
                 } else {
-                    select.value = data.customers[0].application_id;
+                    select.value = customers[0].application_id;
                 }
-                list.innerHTML = data.customers.map(customer => `
+                list.innerHTML = customers.map(customer => `
                     <div class="job-item" style="padding: 10px; margin-bottom: 8px;">
                         <div class="job-header">
                             <span class="job-type">${getApplicationLabel(customer.application_id)}</span>
