@@ -79,7 +79,7 @@ def load_gpsgate_applications(session, only_application_id: int | None = None) -
 
     q = session.query(GpsGateApplication).order_by(GpsGateApplication.application_id)
     if only_application_id:
-        q = q.filter(GpsGateApplication.application_id == only_application_id)
+        q = q.filter(GpsGateApplication.application_id == int(only_application_id))
 
     rows = q.all()
     if not rows:
