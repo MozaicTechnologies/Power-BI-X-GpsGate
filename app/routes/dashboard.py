@@ -365,6 +365,37 @@ def trigger_full_backfill():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@dashboard_bp.route('/task/<task_id>/cancel', methods=['POST'])
+@login_required
+def cancel_task(task_id):
+    """Revoke a running or queued Celery task."""
+    from celery.result import AsyncResult
+    from app.models import JobLog
+    try:
+        from app.celery_app import celery
+        ar = AsyncResult(task_id)
+        # terminate=True sends SIGTERM to the worker process running it
+        celery.control.revoke(task_id, terminate=True, signal='SIGTERM')
+
+        # Mark as failed in JobLog if it exists
+        try:
+            entry = JobLog.query.filter_by(task_id=task_id).first()
+            if entry and entry.status == 'running':
+                from datetime import timezone as _tz
+                entry.status        = 'failed'
+                entry.completed_at  = datetime.now(_tz.utc)
+                entry.error_message = 'Cancelled by user'
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+        logger.info("cancel_task | task_id=%s state=%s", task_id, ar.state)
+        return jsonify({'success': True, 'task_id': task_id})
+    except Exception as e:
+        logger.error("cancel_task | task_id=%s error=%s", task_id, e)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @dashboard_bp.route('/task-status/<task_id>', methods=['GET'])
 @login_required
 def get_task_status(task_id):

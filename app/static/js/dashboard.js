@@ -366,17 +366,46 @@ function _renderJobCard(job) {
 
     const borderColor = { running:'#0d6efd', queued:'#fd7e14', completed:'#198754', failed:'#dc3545' }[job.status] || '#ccc';
 
+    const cancelBtn = (job.status === 'running' || job.status === 'queued')
+        ? `<button onclick="cancelJob('${job.id}', this)"
+               style="background:#dc3545;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:0.78rem;cursor:pointer;margin-left:8px;"
+               title="Cancel this job">✕ Cancel</button>`
+        : '';
+
     return `
         <div class="job-item ${job.status}" style="border-left:4px solid ${borderColor};padding:10px 14px;margin-bottom:8px;border-radius:4px;background:#fff;">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:4px;">
                 <div>${header}</div>
-                ${_jobStatusBadge(job.status)}
+                <div style="display:flex;align-items:center;">${_jobStatusBadge(job.status)}${cancelBtn}</div>
             </div>
             ${progressHtml}
             ${statsHtml}
             ${errorHtml}
             <div style="font-size:0.78rem;color:#999;margin-top:6px;">${timing}</div>
         </div>`;
+}
+
+async function cancelJob(taskId, btn) {
+    if (!confirm('Cancel this job?')) return;
+    btn.disabled = true;
+    btn.textContent = '…';
+    try {
+        const res  = await fetch(`/dashboard/task/${taskId}/cancel`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            btn.textContent = 'Cancelled';
+            btn.style.background = '#6c757d';
+            setTimeout(refreshJobs, 800);
+        } else {
+            btn.disabled = false;
+            btn.textContent = '✕ Cancel';
+            showMessage('error', data.error || 'Cancel failed');
+        }
+    } catch (e) {
+        btn.disabled = false;
+        btn.textContent = '✕ Cancel';
+        showMessage('error', 'Request failed: ' + e.message);
+    }
 }
 
 async function refreshJobs() {
