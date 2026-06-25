@@ -496,6 +496,72 @@ async function refreshSchedulerStatus() {
 
 
 
+// ── Admin Config Modal ─────────────────────────────────────────────────────────
+
+async function openAdminConfig() {
+    document.getElementById('admin-cfg-modal').style.display = 'flex';
+    document.getElementById('admin-cfg-input').value = '';
+    document.getElementById('admin-cfg-msg').textContent = '';
+    document.getElementById('admin-cfg-masked').textContent = 'بارگذاری...';
+    document.getElementById('admin-cfg-source').textContent = '';
+    try {
+        const res  = await fetch('/dashboard/admin-config');
+        const data = await res.json();
+        if (data.success) {
+            document.getElementById('admin-cfg-masked').textContent = data.masked;
+            document.getElementById('admin-cfg-source').textContent = `(${data.source})`;
+        }
+    } catch (e) {
+        document.getElementById('admin-cfg-masked').textContent = 'خطا در بارگذاری';
+    }
+}
+
+function closeAdminConfig() {
+    document.getElementById('admin-cfg-modal').style.display = 'none';
+}
+
+function toggleAdminTokenVisibility() {
+    const inp = document.getElementById('admin-cfg-input');
+    const eye = document.getElementById('admin-cfg-eye');
+    if (inp.type === 'password') { inp.type = 'text';     eye.textContent = '🙈'; }
+    else                         { inp.type = 'password'; eye.textContent = '👁';  }
+}
+
+async function saveAdminConfig() {
+    const token = document.getElementById('admin-cfg-input').value.trim();
+    const msg   = document.getElementById('admin-cfg-msg');
+    if (!token) { msg.style.color = '#dc3545'; msg.textContent = 'توکن نمی‌تواند خالی باشد'; return; }
+    msg.style.color = '#888'; msg.textContent = 'در حال ذخیره...';
+    try {
+        const res  = await fetch('/dashboard/admin-config', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({token})
+        });
+        const data = await res.json();
+        if (data.success) {
+            msg.style.color = '#198754';
+            msg.textContent = '✅ ' + data.message;
+            document.getElementById('admin-cfg-masked').textContent = data.message.match(/\((.+)\)/)?.[1] || '---';
+            document.getElementById('admin-cfg-source').textContent = '(database)';
+            document.getElementById('admin-cfg-input').value = '';
+        } else {
+            msg.style.color = '#dc3545';
+            msg.textContent = '❌ ' + (data.error || 'خطا');
+        }
+    } catch (e) {
+        msg.style.color = '#dc3545';
+        msg.textContent = '❌ ' + e.message;
+    }
+}
+
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeAdminConfig();
+});
+document.getElementById('admin-cfg-modal')?.addEventListener('click', e => {
+    if (e.target === document.getElementById('admin-cfg-modal')) closeAdminConfig();
+});
+
 // Initialize dashboard
 refreshJobs();
 refreshCustomerConfigs();

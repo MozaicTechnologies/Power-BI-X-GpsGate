@@ -14,6 +14,7 @@ import os
 from app.models import (
     db,
     GpsGateApplication,
+    SystemConfig,
     FactTrip,
     FactSpeeding,
     FactIdle,
@@ -218,11 +219,12 @@ NAME_TO_ID_FIELD_MAP = {
 def list_eligible_applications():
     """Fetch eligible applications from GpsGate using the admin token (env TOKEN_ADMIN)."""
     try:
-        admin_token = (os.getenv('TOKEN_ADMIN') or '').strip()
+        row = SystemConfig.query.filter_by(key='TOKEN_ADMIN').first()
+        admin_token = (row.value if row and row.value else os.getenv('TOKEN_ADMIN') or '').strip()
         if not admin_token:
             return jsonify({
                 'success': False,
-                'error': 'TOKEN_ADMIN env var is not set'
+                'error': 'TOKEN_ADMIN is not set — use the 🔑 button to configure it'
             }), 500
 
         auth_token = normalize_token(admin_token)
@@ -858,6 +860,42 @@ def cleanup_data():
             'success': False,
             'error': str(e)
         }), 500
+
+
+@dashboard_bp.route('/admin-config', methods=['GET'])
+@login_required
+def get_admin_config():
+    """Return current admin token (masked) from DB or env."""
+    row = SystemConfig.query.filter_by(key='TOKEN_ADMIN').first()
+    raw = (row.value if row and row.value else os.getenv('TOKEN_ADMIN') or '').strip()
+    masked = f"{raw[:6]}...{raw[-4:]}" if len(raw) > 10 else ('(not set)' if not raw else raw)
+    source = 'database' if (row and row.value) else ('environment' if raw else 'not set')
+    return jsonify({'success': True, 'masked': masked, 'is_set': bool(raw), 'source': source})
+
+
+@dashboard_bp.route('/admin-config', methods=['POST'])
+@login_required
+def save_admin_config():
+    """Save admin token to DB and update os.environ for current process."""
+    data  = request.get_json() or {}
+    token = str(data.get('token', '')).strip()
+    if not token:
+        return jsonify({'success': False, 'error': 'Token cannot be empty'}), 400
+    try:
+        row = SystemConfig.query.filter_by(key='TOKEN_ADMIN').first()
+        if row:
+            row.value = token
+        else:
+            db.session.add(SystemConfig(key='TOKEN_ADMIN', value=token))
+        db.session.commit()
+        os.environ['TOKEN_ADMIN'] = token
+        logger.info("admin-config | TOKEN_ADMIN updated | length=%d", len(token))
+        masked = f"{token[:6]}...{token[-4:]}" if len(token) > 10 else token
+        return jsonify({'success': True, 'message': f'Admin token saved ({masked})'})
+    except Exception as e:
+        db.session.rollback()
+        logger.error("admin-config | save failed: %s", e)
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @dashboard_bp.route('/', methods=['GET'])

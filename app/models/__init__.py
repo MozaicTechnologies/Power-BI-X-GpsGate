@@ -3,6 +3,7 @@ from .models import (
     Render,
     Result,
     JobLog,
+    SystemConfig,
     FactTrip,
     FactSpeeding,
     FactIdle,

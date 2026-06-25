@@ -90,6 +90,19 @@ class Result(db.Model):
 
 
 # ------------------------------------------------------------------
+# SYSTEM CONFIG  (key-value store for admin settings)
+# ------------------------------------------------------------------
+
+class SystemConfig(db.Model):
+    __tablename__ = "system_config"
+
+    id         = db.Column(db.Integer, primary_key=True)
+    key        = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    value      = db.Column(db.Text, nullable=True)
+    updated_at = db.Column(db.DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+# ------------------------------------------------------------------
 # JOB LOG  (Celery task history)
 # ------------------------------------------------------------------
 

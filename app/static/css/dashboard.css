@@ -246,6 +246,31 @@ button:disabled {
     transform: scale(1.05);
 }
 
+.admin-cfg-btn {
+    position: fixed;
+    top: 18px;
+    left: 72px;
+    z-index: 3000;
+    background: rgba(255,255,255,0.2);
+    border: 2px solid rgba(255,255,255,0.5);
+    color: white;
+    width: 46px;
+    height: 46px;
+    border-radius: 10px;
+    font-size: 1.2rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(6px);
+    transition: background 0.2s, transform 0.2s;
+    padding: 0;
+}
+.admin-cfg-btn:hover {
+    background: rgba(255,255,255,0.35);
+    transform: scale(1.05);
+}
+
 /* ── Sidebar overlay ───────────────────────────────────────────────────────── */
 #db-sidebar-overlay {
     display: none;
