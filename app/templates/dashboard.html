@@ -28,6 +28,8 @@
         <h1>🚀 GpsGate Data Pipeline Dashboard</h1>
         
         <div class="grid">
+            <!-- Manual Triggers + Live Statistics side by side, full width -->
+            <div style="grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
             <!-- Manual Triggers -->
             <div class="card">
                 <h2>📊 Manual Triggers</h2>
@@ -251,13 +253,14 @@
                     🔄 Refresh Stats
                 </button>
             </div>
-            
+            </div><!-- end two-column wrapper -->
+
             <!-- Last Sync Info -->
-            <div class="card">
+            <div class="card" style="grid-column: 1 / -1;">
                 <h2>⏰ Last Sync</h2>
                 <div id="last-sync-info">Loading...</div>
             </div>
-            
+
             <!-- Scheduler Status -->
             <div class="card" style="grid-column: 1 / -1;">
                 <h2>🕐 Automated Scheduler Status</h2>
