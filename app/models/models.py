@@ -345,8 +345,39 @@ class FactHA(db.Model):
     )
 
 
-class FactHB(FactHA):
+class FactHB(db.Model):
     __tablename__ = "fact_hb"
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    app_id = db.Column(db.String(50), nullable=False)
+    gpsgate_application_id = db.Column(
+        db.Integer,
+        db.ForeignKey("gpsgate_application.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    tag_id = db.Column(db.String(50), nullable=False)
+
+    event_date = db.Column(db.Date, nullable=False)
+    start_time = db.Column(db.Time, nullable=False)
+
+    vehicle    = db.Column(db.String(255))
+    driver     = db.Column(db.String(255))
+    severity   = db.Column(db.String(50))
+
+    location = db.Column(db.Text)
+    address  = db.Column(db.Text)
+
+    duration   = db.Column(db.String(50))
+    duration_s = db.Column(db.Integer)
+
+    is_duplicate = db.Column(db.Boolean, default=False)
+    created_at   = db.Column(db.DateTime, default=_utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("app_id", "event_date", "start_time", "vehicle",
+                            name="uq_fact_hb"),
+    )
 
 
 class FactWU(db.Model):
