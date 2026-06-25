@@ -2,6 +2,7 @@ from .models import (
     db,
     Render,
     Result,
+    JobLog,
     FactTrip,
     FactSpeeding,
     FactIdle,

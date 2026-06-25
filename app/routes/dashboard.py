@@ -393,37 +393,113 @@ def get_task_status(task_id):
 @dashboard_bp.route('/status/recent', methods=['GET'])
 @login_required
 def get_recent_jobs():
-    """Live job status from Celery workers."""
+    """Live job status: running/queued tasks from Celery + recent history from JobLog."""
+    from app.models import JobLog
+    from celery.result import AsyncResult
+
+    jobs = []
+    seen_task_ids = set()
+
+    # ── 1. Active / queued tasks from Celery inspect ──────────────────────────
     try:
         from app.celery_app import celery
-        inspect = celery.control.inspect(timeout=3)
+        inspect  = celery.control.inspect(timeout=3)
         active   = inspect.active()   or {}
         reserved = inspect.reserved() or {}
 
-        jobs = []
-        for worker, tasks in active.items():
+        for _worker, tasks in active.items():
             for t in tasks:
+                task_id  = t['id']
+                seen_task_ids.add(task_id)
+                from datetime import timezone as _tz
+                started  = datetime.fromtimestamp(t['time_start'], tz=_tz.utc).isoformat() if t.get('time_start') else None
+
+                # Get live progress from Celery result backend
+                progress = {}
+                try:
+                    ar   = AsyncResult(task_id)
+                    info = ar.info or {}
+                    if isinstance(info, dict):
+                        progress = {
+                            'percent':      info.get('percent', 0),
+                            'phase_status': info.get('status', ''),
+                            'event_type':   info.get('event_type'),
+                            'week':         info.get('week'),
+                            'inserted':     info.get('inserted', 0),
+                            'phase':        info.get('phase'),
+                        }
+                except Exception:
+                    pass
+
                 jobs.append({
-                    'id':         t['id'],
-                    'job_type':   t['name'].replace('tasks.', ''),
-                    'status':     'running',
-                    'started_at': datetime.utcfromtimestamp(t['time_start']).isoformat() if t.get('time_start') else None,
-                    'worker':     worker,
-                })
-        for worker, tasks in reserved.items():
-            for t in tasks:
-                jobs.append({
-                    'id':         t['id'],
-                    'job_type':   t['name'].replace('tasks.', ''),
-                    'status':     'queued',
-                    'started_at': None,
-                    'worker':     worker,
+                    'id':          task_id,
+                    'job_type':    t['name'].replace('tasks.', ''),
+                    'status':      'running',
+                    'started_at':  started,
+                    'completed_at': None,
+                    'application_id': progress.get('customer') or None,
+                    'metadata': progress,
                 })
 
-        return jsonify({'success': True, 'jobs': jobs})
+        for worker, tasks in reserved.items():
+            for t in tasks:
+                task_id = t['id']
+                seen_task_ids.add(task_id)
+                jobs.append({
+                    'id':           task_id,
+                    'job_type':     t['name'].replace('tasks.', ''),
+                    'status':       'queued',
+                    'started_at':   None,
+                    'completed_at': None,
+                    'application_id': None,
+                    'metadata': {},
+                })
     except Exception as e:
-        logger.error(f"get_recent_jobs failed: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        logger.warning(f"Celery inspect failed (worker may be down): {e}")
+
+    # ── 2. Recent history from JobLog ─────────────────────────────────────────
+    try:
+        logs = (
+            JobLog.query
+            .order_by(JobLog.started_at.desc())
+            .limit(30)
+            .all()
+        )
+        for log in logs:
+            if log.task_id in seen_task_ids:
+                continue  # already in active list
+            meta = log.job_metadata or {}
+            jobs.append({
+                'id':               log.task_id,
+                'job_type':         log.job_type,
+                'status':           log.status,
+                'started_at':       log.started_at.isoformat() if log.started_at else None,
+                'completed_at':     log.completed_at.isoformat() if log.completed_at else None,
+                'application_id':   log.application_id,
+                'records_processed': log.records_processed,
+                'error_message':    log.error_message,
+                'metadata': {
+                    'start_date':        meta.get('start_date'),
+                    'end_date':          meta.get('end_date'),
+                    'date':              meta.get('date'),
+                    'total_inserted':    meta.get('total_inserted'),
+                    'total_skipped':     meta.get('total_skipped'),
+                    'total_failed':      meta.get('total_failed'),
+                    'dimension_records': meta.get('dimension_records'),
+                },
+            })
+    except Exception as e:
+        logger.error(f"JobLog query failed: {e}")
+
+    # Sort: running/queued first, then by started_at desc
+    def _sort_key(j):
+        order = {'running': 0, 'queued': 1, 'completed': 2, 'failed': 2}
+        ts = j.get('started_at') or ''
+        return (order.get(j['status'], 3), ts)
+
+    jobs.sort(key=_sort_key)
+
+    return jsonify({'success': True, 'jobs': jobs})
 
 
 @dashboard_bp.route('/stats/table-counts', methods=['GET'])

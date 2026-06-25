@@ -288,27 +288,108 @@ function formatJobMetadata(job) {
     return details.length ? details.join('<br>') + '<br>' : '';
 }
 
+function _jobStatusBadge(status) {
+    const map = {
+        running:   { icon: '⚙️', label: 'Running',   color: '#0d6efd' },
+        queued:    { icon: '⏳', label: 'Queued',    color: '#fd7e14' },
+        completed: { icon: '✅', label: 'Completed', color: '#198754' },
+        failed:    { icon: '❌', label: 'Failed',    color: '#dc3545' },
+    };
+    const s = map[status] || { icon: '❓', label: status, color: '#6c757d' };
+    return `<span class="job-status ${status}" style="color:${s.color};font-weight:600;">${s.icon} ${s.label}</span>`;
+}
+
+function _elapsed(startedAt, completedAt) {
+    if (!startedAt) return '';
+    const start = new Date(startedAt);
+    const end   = completedAt ? new Date(completedAt) : new Date();
+    const secs  = Math.floor((end - start) / 1000);
+    if (secs < 60)  return `${secs}s`;
+    if (secs < 3600) return `${Math.floor(secs/60)}m ${secs%60}s`;
+    return `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m`;
+}
+
+function _renderJobCard(job) {
+    const meta     = job.metadata || {};
+    const appId    = job.application_id || meta.application_id || null;
+    const dateRange = (meta.start_date && meta.end_date)
+        ? `${meta.start_date} → ${meta.end_date}`
+        : (meta.date || '');
+
+    // Header line
+    let header = `<strong>${job.job_type.replace(/_/g, ' ')}</strong>`;
+    if (appId)    header += `  <span style="color:#666;font-size:0.88rem;">App: <strong>${appId}</strong></span>`;
+    if (dateRange) header += `  <span style="color:#888;font-size:0.85rem;">${dateRange}</span>`;
+
+    // Status + timing
+    const elapsed = _elapsed(job.started_at, job.completed_at);
+    let timing = job.started_at ? `Started: ${new Date(job.started_at).toLocaleString()}` : '';
+    if (job.status === 'running') timing += elapsed ? `  &nbsp;·&nbsp; running <strong>${elapsed}</strong>` : '';
+    if (job.status === 'completed' && elapsed) timing += `  &nbsp;·&nbsp; took <strong>${elapsed}</strong>`;
+
+    // Progress bar for running tasks
+    let progressHtml = '';
+    if (job.status === 'running') {
+        const pct     = meta.percent || 0;
+        const phase   = meta.phase_status || '';
+        const evType  = meta.event_type ? ` [${meta.event_type}]` : '';
+        const week    = meta.week ? ` · ${meta.week}` : '';
+        const ins     = meta.inserted != null ? ` · ${Number(meta.inserted).toLocaleString()} inserted` : '';
+        progressHtml = `
+            <div style="margin:8px 0 4px;">
+                <div style="background:#e9ecef;border-radius:4px;height:8px;overflow:hidden;">
+                    <div style="background:#0d6efd;height:100%;width:${pct}%;transition:width .4s;"></div>
+                </div>
+                <div style="font-size:0.8rem;color:#555;margin-top:3px;">
+                    ${pct}%${evType}${week}${ins}
+                    ${phase ? `<br><em>${phase}</em>` : ''}
+                </div>
+            </div>`;
+    }
+
+    // Stats for completed
+    let statsHtml = '';
+    if (job.status === 'completed') {
+        const parts = [];
+        if (meta.dimension_records != null) parts.push(`Dims: <strong>${Number(meta.dimension_records).toLocaleString()}</strong>`);
+        if (meta.total_inserted    != null) parts.push(`Inserted: <strong>${Number(meta.total_inserted).toLocaleString()}</strong>`);
+        if (meta.total_skipped     != null) parts.push(`Skipped: ${Number(meta.total_skipped).toLocaleString()}`);
+        if (meta.total_failed      != null && meta.total_failed > 0) parts.push(`<span style="color:#dc3545;">Failed: ${meta.total_failed}</span>`);
+        if (job.records_processed  != null && !parts.length) parts.push(`Records: <strong>${Number(job.records_processed).toLocaleString()}</strong>`);
+        if (parts.length) statsHtml = `<div style="font-size:0.85rem;color:#444;margin-top:5px;">${parts.join('&ensp;·&ensp;')}</div>`;
+    }
+
+    // Error
+    const errorHtml = job.error_message
+        ? `<div style="color:#dc3545;font-size:0.82rem;margin-top:5px;word-break:break-word;">⚠ ${job.error_message}</div>`
+        : '';
+
+    const borderColor = { running:'#0d6efd', queued:'#fd7e14', completed:'#198754', failed:'#dc3545' }[job.status] || '#ccc';
+
+    return `
+        <div class="job-item ${job.status}" style="border-left:4px solid ${borderColor};padding:10px 14px;margin-bottom:8px;border-radius:4px;background:#fff;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:4px;">
+                <div>${header}</div>
+                ${_jobStatusBadge(job.status)}
+            </div>
+            ${progressHtml}
+            ${statsHtml}
+            ${errorHtml}
+            <div style="font-size:0.78rem;color:#999;margin-top:6px;">${timing}</div>
+        </div>`;
+}
+
 async function refreshJobs() {
     try {
         const response = await fetch('/dashboard/status/recent');
         const data = await response.json();
         if (data.success) {
             const jobList = document.getElementById('job-list');
-            jobList.innerHTML = data.jobs.map(job => `
-	                        <div class="job-item ${job.status}">
-	                            <div class="job-header">
-	                                <span class="job-type">${job.job_type}</span>
-	                                <span class="job-status ${job.status}">${job.status}</span>
-	                            </div>
-	                            <div class="job-details">
-	                                Started: ${new Date(job.started_at).toLocaleString()}<br>
-	                                ${job.completed_at ? 'Completed: ' + new Date(job.completed_at).toLocaleString() + '<br>' : ''}
-	                                ${formatJobMetadata(job)}
-	                                ${job.records_processed ? 'Records: ' + job.records_processed.toLocaleString() + '<br>' : ''}
-	                                ${job.error_message ? 'Error: ' + job.error_message : ''}
-	                            </div>
-	                        </div>
-	                    `).join('');
+            if (!data.jobs.length) {
+                jobList.innerHTML = '<em style="color:#888;font-size:0.9rem;">No recent jobs</em>';
+            } else {
+                jobList.innerHTML = data.jobs.map(_renderJobCard).join('');
+            }
         }
     } catch (error) {
         console.error('Failed to refresh jobs:', error);

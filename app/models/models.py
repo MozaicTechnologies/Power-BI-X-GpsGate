@@ -90,6 +90,25 @@ class Result(db.Model):
 
 
 # ------------------------------------------------------------------
+# JOB LOG  (Celery task history)
+# ------------------------------------------------------------------
+
+class JobLog(db.Model):
+    __tablename__ = "job_log"
+
+    id                = db.Column(db.Integer, primary_key=True)
+    task_id           = db.Column(db.String(64), unique=True, index=True, nullable=False)
+    job_type          = db.Column(db.String(64), nullable=False)
+    status            = db.Column(db.String(20),  nullable=False, default="running")  # running / completed / failed
+    application_id    = db.Column(db.Integer,   nullable=True)
+    started_at        = db.Column(db.DateTime(timezone=True), default=_utcnow)
+    completed_at      = db.Column(db.DateTime(timezone=True), nullable=True)
+    records_processed = db.Column(db.Integer,   nullable=True)
+    job_metadata      = db.Column(db.JSON,      nullable=True)
+    error_message     = db.Column(db.Text,      nullable=True)
+
+
+# ------------------------------------------------------------------
 # FACT TABLES (NO MIXIN – EXPLICIT IS SAFER)
 # ------------------------------------------------------------------
 
