@@ -232,6 +232,36 @@ def call_api(*, method="GET", base_url, path, token, params=None, json_payload=N
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _fetch_all_users(application_id: int, auth_token: str, page_size: int = 1000) -> list:
+    all_users: list = []
+    from_index = 0
+    batch = 1
+    while True:
+        data = call_api(
+            base_url=BASE_URL,
+            path=f"comGpsGate/api/v.1/applications/{application_id}/users?take={page_size}&FromIndex={from_index}",
+            token=auth_token,
+            timeout=60,
+        )
+        if not data:
+            break
+        all_users.extend(data)
+        logger.debug("_fetch_all_users | app=%s batch=%d fetched=%d total=%d", application_id, batch, len(data), len(all_users))
+        if len(data) < page_size:
+            break
+        last_id = data[-1].get("id")
+        if not last_id or last_id == from_index:
+            break
+        from_index = last_id
+        batch += 1
+    logger.info("_fetch_all_users | DONE | app=%s total=%d", application_id, len(all_users))
+    return all_users
+
+
+# ---------------------------------------------------------------------------
 # Sync functions
 # ---------------------------------------------------------------------------
 
@@ -278,7 +308,17 @@ def sync_vehicles_and_drivers(session, application_id: int, auth_token: str) -> 
     from app.models import DimVehicles, DimDrivers
 
     logger.info("sync_vehicles_and_drivers | START | app=%s", application_id)
-    users = call_api(base_url=BASE_URL, path=f"comGpsGate/api/v.1/applications/{application_id}/users", token=auth_token, timeout=60)
+
+    try:
+        roles = call_api(base_url=BASE_URL, path=f"comGpsGate/api/v.1/applications/{application_id}/roles", token=auth_token) or []
+        unit_role = next((r for r in roles if r.get("name") == "_Unit"), None)
+        unit_user_ids = set(unit_role.get("usersIds") or []) if unit_role else set()
+        logger.info("sync_vehicles_and_drivers | _Unit count=%d | app=%s", len(unit_user_ids), application_id)
+    except Exception:
+        logger.warning("sync_vehicles_and_drivers | roles fetch failed, vehicle_rows will be empty | app=%s", application_id)
+        unit_user_ids = set()
+
+    users = _fetch_all_users(application_id, auth_token)
 
     vehicle_rows = []
     driver_rows = []
@@ -292,9 +332,9 @@ def sync_vehicles_and_drivers(session, application_id: int, auth_token: str) -> 
         position    = track_point.get("position") or {}
         devices     = user.get("devices") or []
         device_name = devices[0].get("name") if devices else None
-        imei        = devices[0].get("imei") if devices else None
+        imei        = next((d.get("imei") for d in devices if d.get("imei")), None)
 
-        if imei:
+        if int(user["id"]) in unit_user_ids:
             vehicle_rows.append({
                 "id": int(user["id"]), "application_id": application_id,
                 "name": user.get("name"), "username": user.get("username"),
