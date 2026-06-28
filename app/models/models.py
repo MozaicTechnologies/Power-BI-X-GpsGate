@@ -217,6 +217,7 @@ class FactIdle(db.Model):
     start_time = db.Column(db.Time, nullable=False)
     event_time = db.Column(db.DateTime, nullable=True)
     stop_time = db.Column(db.DateTime)
+    event_start_ts = db.Column(db.DateTime)
 
 
     vehicle = db.Column(db.String(255))
