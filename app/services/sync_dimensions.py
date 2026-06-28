@@ -373,15 +373,21 @@ def sync_vehicles_and_drivers(session, application_id: int, auth_token: str) -> 
 
 
 def sync_vehicle_custom_fields(session, application_id: int, auth_token: str, on_progress=None) -> int:
-    from app.models import DimVehicleCustomFields
+    from app.models import DimVehicleCustomFields, DimVehicles
 
     logger.info("sync_vehicle_custom_fields | START | app=%s", application_id)
-    users = call_api(base_url=BASE_URL, path=f"comGpsGate/api/v.1/applications/{application_id}/users", token=auth_token, timeout=60)
+
+    vehicle_ids = [
+        row[0] for row in
+        session.query(DimVehicles.id).filter(DimVehicles.application_id == application_id).all()
+    ]
+    logger.info("sync_vehicle_custom_fields | vehicles from DB=%d | app=%s", len(vehicle_ids), application_id)
 
     rows: list[dict] = []
     skipped = 0
     total_processed = 0
     BATCH = 500
+    total = len(vehicle_ids)
 
     def _flush():
         if not rows:
@@ -392,23 +398,20 @@ def sync_vehicle_custom_fields(session, application_id: int, auth_token: str, on
             set_={"field_value": stmt.excluded.field_value},
         ))
 
-    for idx, user in enumerate(users, start=1):
-        user_id = user.get("id")
-        if not user_id:
-            continue
+    for idx, vehicle_id in enumerate(vehicle_ids, start=1):
         if idx % 25 == 0:
-            logger.debug("sync_vehicle_custom_fields | PROGRESS | app=%s users=%d/%d",
-                         application_id, idx, len(users))
+            logger.debug("sync_vehicle_custom_fields | PROGRESS | app=%s vehicles=%d/%d",
+                         application_id, idx, total)
             if on_progress:
-                on_progress(f"App {application_id} — Custom Fields {idx}/{len(users)}", idx, len(users))
+                on_progress(f"App {application_id} — Custom Fields {idx}/{total}", idx, total)
         try:
-            fields = call_api(base_url=BASE_URL, path=f"comGpsGate/api/v.1/applications/{application_id}/users/{user_id}/customfields", token=auth_token, timeout=30)
+            fields = call_api(base_url=BASE_URL, path=f"comGpsGate/api/v.1/applications/{application_id}/users/{vehicle_id}/customfields", token=auth_token, timeout=30)
         except Exception:
             skipped += 1
-            logger.warning("sync_vehicle_custom_fields | USER_SKIP | app=%s user_id=%s", application_id, user_id)
+            logger.warning("sync_vehicle_custom_fields | VEHICLE_SKIP | app=%s vehicle_id=%s", application_id, vehicle_id)
             continue
-        for field in fields:
-            rows.append({"application_id": application_id, "vehicle_id": int(user_id), "field_name": field.get("name"), "field_value": str(field.get("value"))})
+        for field in (fields or []):
+            rows.append({"application_id": application_id, "vehicle_id": int(vehicle_id), "field_name": field.get("name"), "field_value": str(field.get("value"))})
             total_processed += 1
         if len(rows) >= BATCH:
             _flush()
