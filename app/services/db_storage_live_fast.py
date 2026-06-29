@@ -163,6 +163,8 @@ def _build_records(df, app_id, tag_id, event_name, now, gpsgate_application_id):
             rec["severity"] = r.v_severity or None
         elif event_name == "WU":
             rec["violation_type"] = r.v_vtype or None
+        elif event_name == "WH":
+            rec["event_time"] = r.v_time if pd.notna(r.v_time) else None
 
         records.append(rec)
 
