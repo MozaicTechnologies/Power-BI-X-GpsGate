@@ -113,8 +113,14 @@ def _build_records(df, app_id, tag_id, event_name, now, gpsgate_application_id):
     # NON-TRIP (Speeding / Idle / AWH / WH / HA / HB / WU)
     # ---------------------------------------------------------------
     df["v_driver"] = _col(df, "Driver", "Driver Name")
-    df["v_date"]   = _to_dt(df, "Start Date")
     df["v_time"]   = _to_dt(df, "Start Time")
+
+    # Some event reports (e.g. AWH) use the Trip format where "Start Time"
+    # holds a full datetime — no separate "Start Date" column.
+    if "Start Date" in df.columns:
+        df["v_date"] = _to_dt(df, "Start Date")
+    else:
+        df["v_date"] = df["v_time"]
 
     bad_dt = df["v_date"].isna() | df["v_time"].isna()
     invalid += int(bad_dt.sum())
