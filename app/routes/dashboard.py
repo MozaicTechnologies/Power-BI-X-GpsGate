@@ -800,21 +800,6 @@ def cleanup_data():
 
         logger.info(f"ADMIN CLEANUP COMPLETED: total_deleted={total_deleted} errors={len(errors)} app={application_id}")
 
-        # Delete the gpsgate_application record completely
-        logger.info(f"ADMIN CLEANUP: Deleting gpsgate_application for application_id={application_id}")
-        try:
-            app_to_delete = GpsGateApplication.query.filter_by(application_id=application_id_int).first()
-            if app_to_delete:
-                db.session.delete(app_to_delete)
-                db.session.commit()
-                operations.append("Deleted gpsgate_application record")
-            else:
-                operations.append("No gpsgate_application found to delete")
-        except Exception as e:
-            db.session.rollback()
-            errors.append(f"Failed to delete gpsgate_application: {str(e)}")
-            logger.exception("ADMIN CLEANUP ERROR: gpsgate_application delete failed")
-
         if errors:
             logger.error(f"ADMIN CLEANUP FAILED: {len(errors)} errors occurred")
             return jsonify({
