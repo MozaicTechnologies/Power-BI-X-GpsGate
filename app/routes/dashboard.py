@@ -741,7 +741,6 @@ def cleanup_data():
         if table_type in ['fact', 'both']:
             logger.debug(f"ADMIN CLEANUP: Processing fact tables for application_id={application_id}")
 
-            # Delete from fact tables using SQLAlchemy models
             fact_models = [
                 (FactTrip, 'Trip'),
                 (FactSpeeding, 'Speeding'),
@@ -755,87 +754,66 @@ def cleanup_data():
 
             for model_class, display_name in fact_models:
                 try:
-                    logger.debug(f"ADMIN CLEANUP: Processing {model_class.__tablename__}")
-
-                    with db.session.begin():
-                        # Count records before deletion
-                        count_before = model_class.query.filter_by(gpsgate_application_id=gpsgate_pk_id).count()
-                        logger.info(f"ADMIN CLEANUP: Found {count_before} records in {display_name} for application_id={application_id}")
-
-                        # Delete records
-                        deleted = model_class.query.filter_by(gpsgate_application_id=gpsgate_pk_id).delete()
-                        total_deleted += deleted
-
-                        logger.info(f"ADMIN CLEANUP: Deleted {deleted} records from {display_name} (app_id={application_id})")
-
-                        if deleted > 0:
-                            operations.append(f"Deleted {deleted} records from {display_name}")
-                        else:
-                            operations.append(f"No records found in {display_name}")
+                    count_before = model_class.query.filter_by(gpsgate_application_id=gpsgate_pk_id).count()
+                    logger.info(f"ADMIN CLEANUP: Found {count_before} records in {display_name}")
+                    deleted = model_class.query.filter_by(gpsgate_application_id=gpsgate_pk_id).delete()
+                    db.session.commit()
+                    total_deleted += deleted
+                    operations.append(f"Deleted {deleted} records from {display_name}" if deleted > 0 else f"No records in {display_name}")
+                    logger.info(f"ADMIN CLEANUP: Deleted {deleted} from {display_name}")
                 except Exception as e:
+                    db.session.rollback()
                     error_msg = f"Failed to delete from {display_name}: {str(e)}"
-                    logger.error(f"ADMIN CLEANUP ERROR in {model_class.__tablename__}: {str(e)}")
-                    logger.error(f"ADMIN CLEANUP ERROR DETAILS: type={type(e).__name__}, args={e.args}")
-                    errors.append(error_msg)
-                except Exception as e:
-                    error_msg = f"Failed to delete from {display_name}: {str(e)}"
-                    logger.error(f"ADMIN CLEANUP ERROR: {error_msg}")
+                    logger.exception(f"ADMIN CLEANUP ERROR in {model_class.__tablename__}")
                     errors.append(error_msg)
 
         if table_type in ['dimension', 'both']:
             logger.debug(f"ADMIN CLEANUP: Processing dimension tables for application_id={application_id}")
 
-            # Delete from dimension tables using SQLAlchemy models
             dim_models = [
                 (DimDrivers, 'Drivers'),
                 (DimVehicles, 'Vehicles'),
                 (DimTags, 'Tags'),
                 (DimReports, 'Reports'),
                 (DimEventRules, 'EventRules'),
-                (DimVehicleCustomFields, 'CustomFields')
+                (DimVehicleCustomFields, 'CustomFields'),
             ]
 
             for model_class, display_name in dim_models:
                 try:
-                    logger.debug(f"ADMIN CLEANUP: Processing {model_class.__tablename__}")
-
-                    with db.session.begin():
-                        count_before = db.session.query(func.count()).select_from(model_class).filter(
-                            model_class.application_id == application_id_int
-                        ).scalar() or 0
-                        logger.info(f"ADMIN CLEANUP: Found {count_before} records in {display_name} for application_id={application_id}")
-
-                        deleted = db.session.query(model_class).filter(
-                            model_class.application_id == application_id_int
-                        ).delete(synchronize_session=False)
-                        total_deleted += deleted
-
-                        logger.info(f"ADMIN CLEANUP: Deleted {deleted} records from {display_name} (application_id={application_id})")
-
-                        if deleted > 0:
-                            operations.append(f"Deleted {deleted} records from {display_name}")
-                        else:
-                            operations.append(f"No records found in {display_name}")
+                    count_before = db.session.query(func.count()).select_from(model_class).filter(
+                        model_class.application_id == application_id_int
+                    ).scalar() or 0
+                    logger.info(f"ADMIN CLEANUP: Found {count_before} records in {display_name}")
+                    deleted = db.session.query(model_class).filter(
+                        model_class.application_id == application_id_int
+                    ).delete(synchronize_session=False)
+                    db.session.commit()
+                    total_deleted += deleted
+                    operations.append(f"Deleted {deleted} records from {display_name}" if deleted > 0 else f"No records in {display_name}")
+                    logger.info(f"ADMIN CLEANUP: Deleted {deleted} from {display_name}")
                 except Exception as e:
+                    db.session.rollback()
                     error_msg = f"Failed to delete from {display_name}: {str(e)}"
-                    logger.error(f"ADMIN CLEANUP ERROR in {model_class.__tablename__}: {str(e)}")
-                    logger.error(f"ADMIN CLEANUP ERROR DETAILS: type={type(e).__name__}, args={e.args}")
+                    logger.exception(f"ADMIN CLEANUP ERROR in {model_class.__tablename__}")
                     errors.append(error_msg)
 
-        logger.info(f"ADMIN CLEANUP COMPLETED: Total deleted={total_deleted}, operations={len(operations)}, errors={len(errors)} for application_id={application_id}, table_type={table_type}")
+        logger.info(f"ADMIN CLEANUP COMPLETED: total_deleted={total_deleted} errors={len(errors)} app={application_id}")
 
         # Delete the gpsgate_application record completely
         logger.info(f"ADMIN CLEANUP: Deleting gpsgate_application for application_id={application_id}")
         try:
-            with db.session.begin():
-                app_to_delete = GpsGateApplication.query.filter_by(application_id=application_id_int).first()
-                if app_to_delete:
-                    db.session.delete(app_to_delete)
-                    operations.append("Deleted gpsgate_application record")
-                else:
-                    operations.append("No gpsgate_application found to delete")
+            app_to_delete = GpsGateApplication.query.filter_by(application_id=application_id_int).first()
+            if app_to_delete:
+                db.session.delete(app_to_delete)
+                db.session.commit()
+                operations.append("Deleted gpsgate_application record")
+            else:
+                operations.append("No gpsgate_application found to delete")
         except Exception as e:
+            db.session.rollback()
             errors.append(f"Failed to delete gpsgate_application: {str(e)}")
+            logger.exception("ADMIN CLEANUP ERROR: gpsgate_application delete failed")
 
         if errors:
             logger.error(f"ADMIN CLEANUP FAILED: {len(errors)} errors occurred")
