@@ -315,7 +315,7 @@ def sync_vehicles_and_drivers(session, application_id: int, auth_token: str) -> 
         unit_user_ids = set(unit_role.get("usersIds") or []) if unit_role else set()
         logger.info("sync_vehicles_and_drivers | _Unit count=%d | app=%s", len(unit_user_ids), application_id)
     except Exception:
-        logger.warning("sync_vehicles_and_drivers | roles fetch failed, vehicle_rows will be empty | app=%s", application_id)
+        logger.exception("sync_vehicles_and_drivers | roles fetch failed, vehicle_rows will be empty | app=%s", application_id)
         unit_user_ids = set()
 
     users = _fetch_all_users(application_id, auth_token)
