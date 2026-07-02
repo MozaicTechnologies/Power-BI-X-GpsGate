@@ -6,7 +6,7 @@ Provides live status monitoring and manual job execution
 from flask import Blueprint, render_template, jsonify, request
 from flask_login import login_required
 from datetime import datetime, timedelta
-from sqlalchemy import func
+from sqlalchemy import func, text
 from urllib.parse import urljoin
 import traceback
 import requests
@@ -563,53 +563,44 @@ def get_recent_jobs():
 @dashboard_bp.route('/stats/table-counts', methods=['GET'])
 @login_required
 def get_table_counts():
-    """Get record counts for all fact and dimension tables (using raw SQL for accuracy)"""
+    """Get record counts for all fact and dimension tables in a single query."""
     try:
-        # Use raw SQL for fact tables to avoid inheritance issues
-        # (FactWH inherits from FactAWH, FactHB inherits from FactHA)
-        def safe_count(model) -> int:
-            try:
-                return db.session.query(func.count()).select_from(model).scalar() or 0
-            except Exception:
-                db.session.rollback()
-                return 0
+        sql = text("""
+            SELECT 'Trip'           AS tbl, COUNT(*) AS cnt FROM fact_trip
+            UNION ALL SELECT 'Speeding',     COUNT(*) FROM fact_speeding
+            UNION ALL SELECT 'Idle',         COUNT(*) FROM fact_idle
+            UNION ALL SELECT 'AWH',          COUNT(*) FROM fact_awh
+            UNION ALL SELECT 'WH',           COUNT(*) FROM fact_wh
+            UNION ALL SELECT 'HA',           COUNT(*) FROM fact_ha
+            UNION ALL SELECT 'HB',           COUNT(*) FROM fact_hb
+            UNION ALL SELECT 'WU',           COUNT(*) FROM fact_wu
+            UNION ALL SELECT 'Drivers',      COUNT(*) FROM dim_drivers
+            UNION ALL SELECT 'Vehicles',     COUNT(*) FROM dim_vehicles
+            UNION ALL SELECT 'Tags',         COUNT(*) FROM dim_tags
+            UNION ALL SELECT 'Reports',      COUNT(*) FROM dim_reports
+            UNION ALL SELECT 'EventRules',   COUNT(*) FROM dim_event_rules
+            UNION ALL SELECT 'CustomFields', COUNT(*) FROM dim_vehicle_custom_fields
+        """)
+        rows = db.session.execute(sql).fetchall()
 
-        fact_counts = {
-            'Trip':     safe_count(FactTrip),
-            'Speeding': safe_count(FactSpeeding),
-            'Idle':     safe_count(FactIdle),
-            'AWH':      safe_count(FactAWH),
-            'WH':       safe_count(FactWH),
-            'HA':       safe_count(FactHA),
-            'HB':       safe_count(FactHB),
-            'WU':       safe_count(FactWU),
-        }
+        fact_keys = {'Trip', 'Speeding', 'Idle', 'AWH', 'WH', 'HA', 'HB', 'WU'}
+        fact_counts: dict = {}
+        dim_counts: dict = {}
+        for tbl, cnt in rows:
+            (fact_counts if tbl in fact_keys else dim_counts)[tbl] = int(cnt)
 
-        dim_counts = {
-            'Drivers':      safe_count(DimDrivers),
-            'Vehicles':     safe_count(DimVehicles),
-            'Tags':         safe_count(DimTags),
-            'Reports':      safe_count(DimReports),
-            'EventRules':   safe_count(DimEventRules),
-            'CustomFields': safe_count(DimVehicleCustomFields),
-        }
-        
-        total = sum(fact_counts.values())
-        
         return jsonify({
-            'success': True,
-            'counts': fact_counts,
+            'success':   True,
+            'counts':    fact_counts,
             'dim_counts': dim_counts,
-            'total': total,
-            'timestamp': datetime.utcnow().isoformat()
+            'total':     sum(fact_counts.values()),
+            'timestamp': datetime.utcnow().isoformat(),
         })
-        
+
     except Exception as e:
+        db.session.rollback()
         logger.error(f"Failed to get table counts: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @dashboard_bp.route('/stats/last-sync', methods=['GET'])
@@ -912,16 +903,32 @@ _BROWSE_TABLE_MAP = {
 @dashboard_bp.route('/browse', methods=['GET'])
 @login_required
 def list_browse_tables():
-    """Return all browseable tables with their row counts."""
-    tables = []
-    for name, model in _BROWSE_TABLE_MAP.items():
-        try:
-            count = db.session.query(func.count()).select_from(model).scalar() or 0
-        except Exception:
-            db.session.rollback()
-            count = -1
-        tables.append({'name': name, 'count': count})
-    return jsonify({'success': True, 'tables': tables})
+    """Return all browseable tables with their row counts in a single query."""
+    try:
+        sql = text("""
+            SELECT 'gpsgate_application'        AS tbl, COUNT(*) AS cnt FROM gpsgate_application
+            UNION ALL SELECT 'fact_trip',                COUNT(*) FROM fact_trip
+            UNION ALL SELECT 'fact_speeding',            COUNT(*) FROM fact_speeding
+            UNION ALL SELECT 'fact_idle',                COUNT(*) FROM fact_idle
+            UNION ALL SELECT 'fact_awh',                 COUNT(*) FROM fact_awh
+            UNION ALL SELECT 'fact_wh',                  COUNT(*) FROM fact_wh
+            UNION ALL SELECT 'fact_ha',                  COUNT(*) FROM fact_ha
+            UNION ALL SELECT 'fact_hb',                  COUNT(*) FROM fact_hb
+            UNION ALL SELECT 'fact_wu',                  COUNT(*) FROM fact_wu
+            UNION ALL SELECT 'dim_tags',                 COUNT(*) FROM dim_tags
+            UNION ALL SELECT 'dim_event_rules',          COUNT(*) FROM dim_event_rules
+            UNION ALL SELECT 'dim_reports',              COUNT(*) FROM dim_reports
+            UNION ALL SELECT 'dim_vehicles',             COUNT(*) FROM dim_vehicles
+            UNION ALL SELECT 'dim_drivers',              COUNT(*) FROM dim_drivers
+            UNION ALL SELECT 'dim_vehicle_custom_fields', COUNT(*) FROM dim_vehicle_custom_fields
+        """)
+        rows = db.session.execute(sql).fetchall()
+        tables = [{'name': tbl, 'count': int(cnt)} for tbl, cnt in rows]
+        return jsonify({'success': True, 'tables': tables})
+    except Exception:
+        db.session.rollback()
+        logger.exception("list_browse_tables failed")
+        return jsonify({'success': False, 'error': 'Query failed'}), 500
 
 
 @dashboard_bp.route('/browse/<table_name>/<int:row_id>', methods=['DELETE'])

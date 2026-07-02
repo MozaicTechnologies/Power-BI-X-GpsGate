@@ -68,6 +68,14 @@ class Render(db.Model):
     render_id = db.Column(db.String(100), unique=True, nullable=False)
     created_at = db.Column(db.DateTime, default=_utcnow)
 
+    __table_args__ = (
+        db.Index(
+            'ix_render_lookup',
+            'gpsgate_application_id', 'period_start', 'period_end',
+            'tag_id', 'report_id', 'event_id',
+        ),
+    )
+
 
 class Result(db.Model):
     __tablename__ = "result"
@@ -114,7 +122,7 @@ class JobLog(db.Model):
     job_type          = db.Column(db.String(64), nullable=False)
     status            = db.Column(db.String(20),  nullable=False, default="running")  # running / completed / failed
     application_id    = db.Column(db.Integer,   nullable=True)
-    started_at        = db.Column(db.DateTime(timezone=True), default=_utcnow)
+    started_at        = db.Column(db.DateTime(timezone=True), default=_utcnow, index=True)
     completed_at      = db.Column(db.DateTime(timezone=True), nullable=True)
     records_processed = db.Column(db.Integer,   nullable=True)
     job_metadata      = db.Column(db.JSON,      nullable=True)
