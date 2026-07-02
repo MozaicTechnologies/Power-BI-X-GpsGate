@@ -284,6 +284,7 @@ def sync_event_rules(session, application_id: int, auth_token: str) -> int:
     logger.info("sync_event_rules | START | app=%s", application_id)
     data = call_api(base_url=BASE_URL, path=f"comGpsGate/api/v.1/applications/{application_id}/eventrules", token=auth_token) or []
     rows = [{"id": int(r["id"]), "application_id": application_id, "name": r["name"]} for r in data]
+    logger.debug("[ROWS] sync_event_rules | app=%s rows=%s", application_id, rows)
     if rows:
         stmt = pg_insert(DimEventRules).values(rows)
         session.execute(stmt.on_conflict_do_update(index_elements=["id", "application_id"], set_={"name": stmt.excluded.name}))

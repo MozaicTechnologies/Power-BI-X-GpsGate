@@ -286,6 +286,7 @@ def process_event_data(event_name, response_key):
                         "base_url": base_url,
                         "report_id": try_report_id,
                     }
+                    logger.debug("[PAYLOAD] event=%s app=%s payload=%s", event_name, app_id, payload)
                     if event_name != "Trip":
                         payload["event_id"] = event_id
 
