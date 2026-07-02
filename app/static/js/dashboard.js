@@ -66,6 +66,32 @@ function getSelectedApplicationId() {
 }
 
         const _customerTokenMap = {};
+        let _allCustomerConfigs = [];
+
+        function openCustomerConfigsModal() {
+            const modal = document.getElementById('customer-configs-modal');
+            const body = document.getElementById('customer-configs-modal-body');
+            body.innerHTML = _allCustomerConfigs.map(customer => `
+                <div style="background:#f8f9fa;border-radius:10px;padding:16px;margin-bottom:12px;border-left:4px solid #667eea;">
+                    <div style="font-weight:700;font-size:0.98rem;color:#333;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #e0e0e0;">
+                        ${getApplicationLabel(customer.application_id)}
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;font-size:0.82rem;">
+                        <div><span style="color:#888;font-weight:600;">Token</span><br><span style="color:#333;font-family:monospace;word-break:break-all;">${customer.token}</span></div>
+                        <div><span style="color:#888;font-weight:600;">Tag</span><br><span style="color:#333;">${customer.tag_name || '-'} <span style="color:#aaa;">#${customer.tag_id || '-'}</span></span></div>
+                        <div><span style="color:#888;font-weight:600;">Trip Report</span><br><span style="color:#333;">${customer.trip_report_name || '-'} <span style="color:#aaa;">#${customer.trip_report_id || '-'}</span></span></div>
+                        <div><span style="color:#888;font-weight:600;">Event Report</span><br><span style="color:#333;">${customer.event_report_name || '-'} <span style="color:#aaa;">#${customer.event_report_id || '-'}</span></span></div>
+                        <div><span style="color:#888;font-weight:600;">Speed Rule</span><br><span style="color:#333;">${customer.speed_event_rule_name || '-'} <span style="color:#aaa;">#${customer.speed_event_id || '-'}</span></span></div>
+                        <div><span style="color:#888;font-weight:600;">Idle Rule</span><br><span style="color:#333;">${customer.idle_event_rule_name || '-'} <span style="color:#aaa;">#${customer.idle_event_id || '-'}</span></span></div>
+                    </div>
+                </div>
+            `).join('');
+            modal.style.display = 'flex';
+        }
+
+        function closeCustomerConfigsModal() {
+            document.getElementById('customer-configs-modal').style.display = 'none';
+        }
 
         async function refreshCustomerConfigs() {
             try {
@@ -94,31 +120,51 @@ function getSelectedApplicationId() {
                 customers.forEach(c => {
                     if (c.full_token) _customerTokenMap[String(c.application_id)] = c.full_token;
                 });
+                _allCustomerConfigs = customers;
                 if (currentSelection && customers.some(customer => customer.application_id === currentSelection)) {
                     select.value = currentSelection;
                 } else {
                     select.value = customers[0].application_id;
                 }
-                list.innerHTML = customers.map(customer => `
-                    <div class="job-item" style="padding: 10px; margin-bottom: 8px;">
-                        <div class="job-header">
-                            <span class="job-type">${getApplicationLabel(customer.application_id)}</span>
+                const first = customers[0];
+                const extraCount = customers.length - 1;
+                list.innerHTML = `
+                    <div style="background:linear-gradient(135deg,#667eea11,#764ba211);border:1px solid #667eea33;border-radius:10px;padding:14px 16px;margin-bottom:8px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                            <span style="font-weight:700;font-size:0.95rem;color:#4a5568;">${getApplicationLabel(first.application_id)}</span>
+                            <span style="font-size:0.75rem;background:#667eea;color:#fff;border-radius:12px;padding:2px 10px;">Active</span>
                         </div>
-                        <div class="job-details">
-                            Token: ${customer.token}<br>
-                            Tag Name: ${customer.tag_name || '-'}<br>
-                            Tag ID: ${customer.tag_id || '-'}<br>
-                            Trip Report Name: ${customer.trip_report_name || '-'}<br>
-                            Trip Report ID: ${customer.trip_report_id || '-'}<br>
-                            Event Report Name: ${customer.event_report_name || '-'}<br>
-                            Event Report ID: ${customer.event_report_id || '-'}<br>
-                            Speed Rule Name: ${customer.speed_event_rule_name || '-'}<br>
-                            Speed Rule ID: ${customer.speed_event_id || '-'}<br>
-                            Idle Rule Name: ${customer.idle_event_rule_name || '-'}<br>
-                            Idle Rule ID: ${customer.idle_event_id || '-'}
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;font-size:0.8rem;">
+                            <div style="background:#fff;border-radius:6px;padding:7px 10px;">
+                                <div style="color:#999;font-weight:600;margin-bottom:2px;">Token</div>
+                                <div style="color:#333;font-family:monospace;word-break:break-all;font-size:0.75rem;">${first.token}</div>
+                            </div>
+                            <div style="background:#fff;border-radius:6px;padding:7px 10px;">
+                                <div style="color:#999;font-weight:600;margin-bottom:2px;">Tag</div>
+                                <div style="color:#333;">${first.tag_name || '-'} <span style="color:#bbb;">#${first.tag_id || '-'}</span></div>
+                            </div>
+                            <div style="background:#fff;border-radius:6px;padding:7px 10px;">
+                                <div style="color:#999;font-weight:600;margin-bottom:2px;">Trip Report</div>
+                                <div style="color:#333;">${first.trip_report_name || '-'} <span style="color:#bbb;">#${first.trip_report_id || '-'}</span></div>
+                            </div>
+                            <div style="background:#fff;border-radius:6px;padding:7px 10px;">
+                                <div style="color:#999;font-weight:600;margin-bottom:2px;">Event Report</div>
+                                <div style="color:#333;">${first.event_report_name || '-'} <span style="color:#bbb;">#${first.event_report_id || '-'}</span></div>
+                            </div>
+                            <div style="background:#fff;border-radius:6px;padding:7px 10px;">
+                                <div style="color:#999;font-weight:600;margin-bottom:2px;">Speed Rule</div>
+                                <div style="color:#333;">${first.speed_event_rule_name || '-'} <span style="color:#bbb;">#${first.speed_event_id || '-'}</span></div>
+                            </div>
+                            <div style="background:#fff;border-radius:6px;padding:7px 10px;">
+                                <div style="color:#999;font-weight:600;margin-bottom:2px;">Idle Rule</div>
+                                <div style="color:#333;">${first.idle_event_rule_name || '-'} <span style="color:#bbb;">#${first.idle_event_id || '-'}</span></div>
+                            </div>
                         </div>
                     </div>
-                `).join('');
+                    ${extraCount > 0 ? `
+                    <button onclick="openCustomerConfigsModal()" style="width:100%;padding:8px;background:none;border:1.5px dashed #667eea88;border-radius:8px;color:#667eea;font-size:0.82rem;cursor:pointer;font-weight:600;transition:background 0.2s;" onmouseover="this.style.background='#667eea11'" onmouseout="this.style.background='none'">
+                        + ${extraCount} more customer${extraCount > 1 ? 's' : ''} — See All
+                    </button>` : ''}`;
             } catch (error) {
                 console.error('Failed to refresh customer config:', error);
             }
