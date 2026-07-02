@@ -188,6 +188,11 @@ def update_gpsgate_application_from_dims(session, gpsgate_application: dict) -> 
             continue
         v = event_rule_ids.get(id_field)
         updates[id_field] = v
+        if id_field == 'idle_event_id':
+            logger.info(
+                "[SAVE] idle_event_id | app=%s | name=%r → resolved_id=%r | source=sync_dimensions.py:update_gpsgate_application_from_dims",
+                application_id, gpsgate_application.get(name_field), v
+            )
         if v is None:
             missing.append(id_field)
 
@@ -271,9 +276,16 @@ def sync_tags(session, application_id: int, auth_token: str) -> int:
     logger.info("sync_tags | START | app=%s", application_id)
     data = call_api(base_url=BASE_URL, path=f"comGpsGate/api/v.1/applications/{application_id}/tags", token=auth_token) or []
     rows = [{"id": int(r["id"]), "application_id": application_id, "name": r["name"]} for r in data]
+    fresh_ids = [r["id"] for r in rows]
     if rows:
         stmt = pg_insert(DimTags).values(rows)
         session.execute(stmt.on_conflict_do_update(index_elements=["id", "application_id"], set_={"name": stmt.excluded.name}))
+    deleted = session.query(DimTags).filter(
+        DimTags.application_id == application_id,
+        DimTags.id.notin_(fresh_ids),
+    ).delete(synchronize_session=False)
+    if deleted:
+        logger.info("sync_tags | STALE_REMOVED | app=%s deleted=%d", application_id, deleted)
     logger.info("sync_tags | DONE | app=%s rows=%d", application_id, len(rows))
     return len(rows)
 
@@ -285,9 +297,17 @@ def sync_event_rules(session, application_id: int, auth_token: str) -> int:
     data = call_api(base_url=BASE_URL, path=f"comGpsGate/api/v.1/applications/{application_id}/eventrules", token=auth_token) or []
     rows = [{"id": int(r["id"]), "application_id": application_id, "name": r["name"]} for r in data]
     logger.debug("[ROWS] sync_event_rules | app=%s rows=%s", application_id, rows)
+    fresh_ids = [r["id"] for r in rows]
     if rows:
         stmt = pg_insert(DimEventRules).values(rows)
         session.execute(stmt.on_conflict_do_update(index_elements=["id", "application_id"], set_={"name": stmt.excluded.name}))
+    # Remove stale rows whose IDs are no longer present in GpsGate
+    deleted = session.query(DimEventRules).filter(
+        DimEventRules.application_id == application_id,
+        DimEventRules.id.notin_(fresh_ids),
+    ).delete(synchronize_session=False)
+    if deleted:
+        logger.info("sync_event_rules | STALE_REMOVED | app=%s deleted=%d", application_id, deleted)
     logger.info("sync_event_rules | DONE | app=%s rows=%d", application_id, len(rows))
     return len(rows)
 
@@ -298,9 +318,16 @@ def sync_reports(session, application_id: int, auth_token: str) -> int:
     logger.info("sync_reports | START | app=%s", application_id)
     data = call_api(base_url=BASE_URL, path=f"comGpsGate/api/v.1/applications/{application_id}/reports", token=auth_token) or []
     rows = [{"id": int(r["id"]), "application_id": application_id, "name": r["name"]} for r in data]
+    fresh_ids = [r["id"] for r in rows]
     if rows:
         stmt = pg_insert(DimReports).values(rows)
         session.execute(stmt.on_conflict_do_update(index_elements=["id", "application_id"], set_={"name": stmt.excluded.name}))
+    deleted = session.query(DimReports).filter(
+        DimReports.application_id == application_id,
+        DimReports.id.notin_(fresh_ids),
+    ).delete(synchronize_session=False)
+    if deleted:
+        logger.info("sync_reports | STALE_REMOVED | app=%s deleted=%d", application_id, deleted)
     logger.info("sync_reports | DONE | app=%s rows=%d", application_id, len(rows))
     return len(rows)
 
