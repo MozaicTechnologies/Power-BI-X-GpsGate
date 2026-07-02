@@ -155,8 +155,6 @@ def _build_records(df, app_id, tag_id, event_name, now, gpsgate_application_id):
             "duration_s": _safe(r.v_dur_s, int),
             "created_at": now,
         }
-        rec["event_time"] = datetime.combine(r.v_date.date(), r.v_time.time())
-
         if event_name == "Speeding":
             rec["speed"]       = _safe(r.v_speed,  float)
             rec["speed_limit"] = _safe(r.v_slimit, float)
@@ -165,6 +163,8 @@ def _build_records(df, app_id, tag_id, event_name, now, gpsgate_application_id):
             rec["severity"] = r.v_severity or None
         elif event_name == "WU":
             rec["violation_type"] = r.v_vtype or None
+        elif event_name in {"WH", "Idle"}:
+            rec["event_time"] = datetime.combine(r.v_date.date(), r.v_time.time())
 
         records.append(rec)
 
