@@ -608,12 +608,13 @@ document.getElementById('admin-cfg-modal')?.addEventListener('click', e => {
     if (e.target === document.getElementById('admin-cfg-modal')) closeAdminConfig();
 });
 
-// Initialize dashboard
+// Initialize dashboard — staggered to avoid hammering the server at once
 refreshJobs();
 refreshCustomerConfigs();
-refreshLastSync();
-refreshSchedulerStatus();
+setTimeout(refreshStats,           500);   // table counts after jobs
+setTimeout(refreshSchedulerStatus, 1000);  // scheduler after table counts
+setTimeout(refreshLastSync,        1500);  // last-sync last (hits cache)
 
-setInterval(refreshJobs, 5000);  // Refresh jobs every 5 seconds
-setInterval(refreshStats, 30000);  // Refresh stats every 30 seconds
-setInterval(refreshSchedulerStatus, 10000);  // Refresh scheduler status every 10 seconds
+setInterval(refreshJobs,            5000);
+setInterval(refreshStats,          30000);
+setInterval(refreshSchedulerStatus, 10000);

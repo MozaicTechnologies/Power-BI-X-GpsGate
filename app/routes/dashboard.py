@@ -33,10 +33,36 @@ from app.models import (
 from app.services.customer_config import get_event_runtime_config, load_applications, normalize_token
 from app.utils.logger import setup_logger
 from app.config import Config
+import time as _time
 
 logger = setup_logger(__name__)
 
 dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/dashboard')
+
+# ---------------------------------------------------------------------------
+# Celery inspect cache — shared across all endpoints, TTL=5s
+# ---------------------------------------------------------------------------
+_inspect_cache: dict = {"data": None, "ts": 0.0}
+_INSPECT_TTL = 5.0
+
+
+def _cached_inspect() -> dict:
+    now = _time.monotonic()
+    if _inspect_cache["data"] is not None and now - _inspect_cache["ts"] < _INSPECT_TTL:
+        return _inspect_cache["data"]
+    try:
+        from app.celery_app import celery
+        insp = celery.control.inspect(timeout=3)
+        data = {
+            "active":    insp.active()    or {},
+            "reserved":  insp.reserved()  or {},
+            "scheduled": insp.scheduled() or {},
+        }
+    except Exception:
+        data = {"active": {}, "reserved": {}, "scheduled": {}}
+    _inspect_cache["data"] = data
+    _inspect_cache["ts"]   = now
+    return data
 
 def mask_token(token: str | None) -> str:
     token = (token or "").strip()
@@ -435,10 +461,9 @@ def get_recent_jobs():
 
     # ── 1. Active / queued tasks from Celery inspect ──────────────────────────
     try:
-        from app.celery_app import celery
-        inspect  = celery.control.inspect(timeout=3)
-        active   = inspect.active()   or {}
-        reserved = inspect.reserved() or {}
+        _ci      = _cached_inspect()
+        active   = _ci["active"]
+        reserved = _ci["reserved"]
 
         for _worker, tasks in active.items():
             for t in tasks:
@@ -592,9 +617,7 @@ def get_table_counts():
 def get_last_sync_stats():
     """Get currently running sync tasks from Celery workers."""
     try:
-        from app.celery_app import celery
-        inspect = celery.control.inspect(timeout=3)
-        active  = inspect.active() or {}
+        active = _cached_inspect()["active"]
 
         from datetime import timezone
         running: dict[str, dict | None] = {'daily_sync': None, 'weekly_backfill': None}
@@ -617,11 +640,10 @@ def get_last_sync_stats():
 def get_scheduler_status():
     """Get active and scheduled Celery tasks for daily_sync and weekly_backfill."""
     try:
-        from app.celery_app import celery
         from datetime import timezone
-        inspect   = celery.control.inspect(timeout=3)
-        active    = inspect.active()    or {}
-        scheduled = inspect.scheduled() or {}
+        _ci       = _cached_inspect()
+        active    = _ci["active"]
+        scheduled = _ci["scheduled"]
 
         SCHEDULED_TASKS = {'tasks.daily_sync', 'tasks.weekly_backfill'}
 
