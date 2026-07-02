@@ -98,7 +98,7 @@ async function fetchBrowserPage() {
         _browserState.total      = data.total;
 
         // Header
-        thead.innerHTML = '<tr>' + data.columns.map(c => `<th>${c}</th>`).join('') + '</tr>';
+        thead.innerHTML = '<tr>' + data.columns.map(c => `<th>${c}</th>`).join('') + '<th style="width:50px;"></th></tr>';
 
         // Body
         const search = document.getElementById('db-browser-search').value.toLowerCase();
@@ -109,9 +109,13 @@ async function fetchBrowserPage() {
         if (!rows.length) {
             tbody.innerHTML = '<tr><td colspan="99" style="text-align:center;padding:20px;color:#999;">No rows found</td></tr>';
         } else {
-            tbody.innerHTML = rows.map(row =>
-                '<tr>' + data.columns.map(c => `<td>${row[c] ?? ''}</td>`).join('') + '</tr>'
-            ).join('');
+            tbody.innerHTML = rows.map(row => {
+                const id = row['id'];
+                const deletBtn = id != null
+                    ? `<td style="text-align:center;"><button onclick="deleteRow(${JSON.stringify(table)}, ${id})" title="Delete" style="background:none;border:none;cursor:pointer;color:#dc3545;font-size:1rem;padding:2px 6px;" onmouseover="this.style.background='#fde8e8';this.style.borderRadius='4px'" onmouseout="this.style.background='none'">🗑</button></td>`
+                    : '<td></td>';
+                return '<tr>' + data.columns.map(c => `<td>${row[c] ?? ''}</td>`).join('') + deletBtn + '</tr>';
+            }).join('');
         }
 
         // Status
@@ -159,6 +163,23 @@ function browserPerPageChange() {
 
 function browserSearch() {
     fetchBrowserPage();
+}
+
+// ── Delete row ────────────────────────────────────────────────────────────────
+
+async function deleteRow(tableName, rowId) {
+    if (!confirm(`Delete row #${rowId} from ${tableName}?\nThis cannot be undone.`)) return;
+    try {
+        const res  = await fetch(`/dashboard/browse/${tableName}/${rowId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+            fetchBrowserPage();
+        } else {
+            alert('Delete failed: ' + (data.error || 'Unknown error'));
+        }
+    } catch (e) {
+        alert('Delete failed: ' + e.message);
+    }
 }
 
 // ── Keyboard shortcuts ────────────────────────────────────────────────────────

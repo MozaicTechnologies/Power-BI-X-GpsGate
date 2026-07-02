@@ -924,6 +924,27 @@ def list_browse_tables():
     return jsonify({'success': True, 'tables': tables})
 
 
+@dashboard_bp.route('/browse/<table_name>/<int:row_id>', methods=['DELETE'])
+@login_required
+def delete_browse_row(table_name, row_id):
+    """Delete a single row by primary key from any registered table."""
+    model = _BROWSE_TABLE_MAP.get(table_name)
+    if not model:
+        return jsonify({'success': False, 'error': f'Unknown table: {table_name}'}), 404
+    try:
+        row = db.session.get(model, row_id)
+        if row is None:
+            return jsonify({'success': False, 'error': f'Row {row_id} not found'}), 404
+        db.session.delete(row)
+        db.session.commit()
+        logger.info("delete_browse_row | table=%s id=%s", table_name, row_id)
+        return jsonify({'success': True})
+    except Exception:
+        db.session.rollback()
+        logger.exception("delete_browse_row | table=%s id=%s", table_name, row_id)
+        return jsonify({'success': False, 'error': 'Delete failed'}), 500
+
+
 @dashboard_bp.route('/browse/<table_name>', methods=['GET'])
 @login_required
 def browse_table(table_name):
