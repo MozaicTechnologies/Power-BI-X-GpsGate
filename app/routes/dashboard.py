@@ -629,9 +629,10 @@ def get_last_sync_stats():
 @dashboard_bp.route('/stats/scheduler-status', methods=['GET'])
 @login_required
 def get_scheduler_status():
-    """Get active and scheduled Celery tasks for daily_sync and weekly_backfill."""
+    """Get active/scheduled Celery tasks + recent history for daily_sync and weekly_backfill."""
+    from app.models import JobLog
+    from datetime import timezone
     try:
-        from datetime import timezone
         _ci       = _cached_inspect()
         active    = _ci["active"]
         scheduled = _ci["scheduled"]
@@ -652,7 +653,49 @@ def get_scheduler_status():
                 if req.get('name') in SCHEDULED_TASKS:
                     scheduled_jobs.append({'id': req.get('id'), 'job_type': req.get('name', '').replace('tasks.', ''), 'status': 'scheduled', 'eta': t.get('eta')})
 
-        return jsonify({'success': True, 'running_jobs': running_jobs, 'scheduled_jobs': scheduled_jobs, 'daily_syncs': [], 'weekly_backfills': []})
+        def _serialize_log(log):
+            meta = log.job_metadata or {}
+            return {
+                'id':               log.task_id,
+                'job_type':         log.job_type,
+                'status':           log.status,
+                'started_at':       log.started_at.isoformat() if log.started_at else None,
+                'completed_at':     log.completed_at.isoformat() if log.completed_at else None,
+                'records_processed': log.records_processed,
+                'error_message':    log.error_message,
+                'metadata': {
+                    'date':           meta.get('date'),
+                    'start_date':     meta.get('start_date'),
+                    'end_date':       meta.get('end_date'),
+                    'total_inserted': meta.get('total_inserted'),
+                    'total_skipped':  meta.get('total_skipped'),
+                    'total_failed':   meta.get('total_failed'),
+                },
+            }
+
+        daily_syncs = [
+            _serialize_log(log) for log in
+            JobLog.query
+            .filter_by(job_type='daily_sync')
+            .order_by(JobLog.started_at.desc())
+            .limit(5).all()
+        ]
+
+        weekly_backfills = [
+            _serialize_log(log) for log in
+            JobLog.query
+            .filter_by(job_type='weekly_backfill')
+            .order_by(JobLog.started_at.desc())
+            .limit(5).all()
+        ]
+
+        return jsonify({
+            'success':          True,
+            'running_jobs':     running_jobs,
+            'scheduled_jobs':   scheduled_jobs,
+            'daily_syncs':      daily_syncs,
+            'weekly_backfills': weekly_backfills,
+        })
 
     except Exception as e:
         logger.error(f"Failed to get scheduler status: {str(e)}")
