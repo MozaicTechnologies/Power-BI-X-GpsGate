@@ -471,27 +471,6 @@ async function refreshJobs() {
     }
 }
 
-async function refreshLastSync() {
-    try {
-        const response = await fetch('/dashboard/stats/last-sync');
-        const data = await response.json();
-        if (data.success) {
-            const info = document.getElementById('last-sync-info');
-            let html = '';
-            if (data.daily_sync) {
-                html += `<strong>Daily:</strong> ${new Date(data.daily_sync.completed_at).toLocaleString()}<br>`;
-                html += `Records: ${data.daily_sync.records_processed.toLocaleString()}<br><br>`;
-            }
-            if (data.weekly_backfill) {
-                html += `<strong>Weekly:</strong> ${new Date(data.weekly_backfill.completed_at).toLocaleString()}<br>`;
-                html += `Records: ${data.weekly_backfill.records_processed.toLocaleString()}`;
-            }
-            info.innerHTML = html || 'No sync data available';
-        }
-    } catch (error) {
-        console.error('Failed to refresh last sync:', error);
-    }
-}
 
 async function refreshSchedulerStatus() {
     try {
@@ -613,7 +592,6 @@ refreshJobs();
 refreshCustomerConfigs();
 setTimeout(refreshStats,           500);   // table counts after jobs
 setTimeout(refreshSchedulerStatus, 1000);  // scheduler after table counts
-setTimeout(refreshLastSync,        1500);  // last-sync last (hits cache)
 
 setInterval(refreshJobs,            5000);
 setInterval(refreshStats,          30000);

@@ -603,28 +603,6 @@ def get_table_counts():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@dashboard_bp.route('/stats/last-sync', methods=['GET'])
-@login_required
-def get_last_sync_stats():
-    """Get currently running sync tasks from Celery workers."""
-    try:
-        active = _cached_inspect()["active"]
-
-        from datetime import timezone
-        running: dict[str, dict | None] = {'daily_sync': None, 'weekly_backfill': None}
-        for _, tasks in active.items():
-            for t in tasks:
-                name = t['name'].replace('tasks.', '')
-                if name in running:
-                    started = datetime.fromtimestamp(t['time_start'], tz=timezone.utc).isoformat() if t.get('time_start') else None
-                    running[name] = {'id': t['id'], 'job_type': name, 'status': 'running', 'started_at': started}
-
-        return jsonify({'success': True, 'daily_sync': running['daily_sync'], 'weekly_backfill': running['weekly_backfill']})
-
-    except Exception as e:
-        logger.error(f"Failed to get last sync stats: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
 
 @dashboard_bp.route('/stats/scheduler-status', methods=['GET'])
 @login_required
