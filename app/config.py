@@ -44,14 +44,16 @@ class Config:
         "task_track_started":    True,
         "task_send_sent_event":  True,
         "worker_send_task_events": True,
+        "timezone":              "Asia/Muscat",
+        "enable_utc":            True,
         "beat_schedule": {
             "daily-sync": {
                 "task":     "tasks.daily_sync",
-                "schedule": crontab(hour=2, minute=0),
+                "schedule": crontab(hour=2, minute=0),        # 02:00 Muscat (UTC+4)
             },
             "weekly-backfill": {
                 "task":     "tasks.weekly_backfill",
-                "schedule": crontab(hour=3, minute=0, day_of_week=1),
+                "schedule": crontab(hour=3, minute=0, day_of_week=1),  # Mon 03:00 Muscat
             },
         },
     }
