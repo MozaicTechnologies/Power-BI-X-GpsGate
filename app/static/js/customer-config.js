@@ -52,9 +52,25 @@ async function loadMappingOptions() {
             event_rules: data.event_rules || [],
             reports: data.reports || []
         });
+
+        // Apply previously saved config as defaults
+        const saved = (typeof _allCustomerConfigs !== 'undefined')
+            ? _allCustomerConfigs.find(c => String(c.application_id) === String(applicationId))
+            : null;
+        if (saved) {
+            MAPPING_FIELDS.forEach(({selectId, idField}) => {
+                const select = document.getElementById(selectId);
+                const savedId = String(saved[idField] || '');
+                if (savedId && select.querySelector(`option[value="${savedId}"]`)) {
+                    select.value = savedId;
+                }
+            });
+        }
+
         showMappingOptionsMessage(
             'success',
             `Loaded ${data.tags.length} tags · ${data.reports.length} reports · ${data.event_rules.length} event rules`
+            + (saved ? ' · defaults restored from saved config' : '')
         );
     } catch (error) {
         showMappingOptionsMessage('error', 'Request failed: ' + error.message);
