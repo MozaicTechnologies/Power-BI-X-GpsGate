@@ -101,6 +101,13 @@ def daily_sync_task(self):
                 logger.exception("[daily_sync] EVENT FAIL | app=%s | event=%s | date=%s",
                                  app.application_id, et, start_date)
             done += 1
+            _progress(
+                self, done, total_steps,
+                f"Done {et} / app={app.application_id}",
+                event_type=et,
+                customer=str(app.application_id),
+                inserted=total_inserted,
+            )
         results[str(app.application_id)] = app_results
 
     elapsed = time.time() - t0

@@ -85,6 +85,13 @@ def fact_sync_task(self, start_date: str, end_date: str, application_id=None):
                     application_id, week_key, et,
                 )
             done += 1
+            _progress(
+                self, done, total_steps,
+                f"Done {et} for {week_key}",
+                event_type=et,
+                week=week_key,
+                inserted=total_inserted,
+            )
 
         results[week_key] = week_results
 
@@ -176,6 +183,14 @@ def full_backfill_task(self, start_date: str, end_date: str, application_id=None
                     application_id, week_key, et,
                 )
             done += 1
+            _progress(
+                self, done, total_steps,
+                f"Done {et} for {week_key}",
+                phase="facts",
+                event_type=et,
+                week=week_key,
+                inserted=total_inserted,
+            )
         results[week_key] = week_results
 
     elapsed = time.time() - t0
