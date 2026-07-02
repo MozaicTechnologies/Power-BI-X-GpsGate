@@ -61,6 +61,9 @@ def _build_records(df, app_id, tag_id, event_name, now, gpsgate_application_id):
     # --- Validate Vehicle (all event types) ---
     df["v_vehicle"] = _col(df, "Vehicle")
     bad = df["v_vehicle"] == ""
+    if bad.any():
+        for idx in df[bad].index:
+            logger.warning(f"[INVALID] {event_name} row={idx} reason=empty_vehicle raw={df.loc[idx].to_dict()}")
     invalid += int(bad.sum())
     df = df[~bad].reset_index(drop=True)
     if df.empty:
@@ -75,8 +78,12 @@ def _build_records(df, app_id, tag_id, event_name, now, gpsgate_application_id):
     # ---------------------------------------------------------------
     if event_name == "Trip":
         df["v_start"] = _to_dt(df, "Start Time")
-        invalid += int(df["v_start"].isna().sum())
-        df = df[df["v_start"].notna()].reset_index(drop=True)
+        bad_start = df["v_start"].isna()
+        if bad_start.any():
+            for idx in df[bad_start].index:
+                logger.warning(f"[INVALID] Trip row={idx} reason=bad_start_time raw={df.loc[idx].to_dict()}")
+        invalid += int(bad_start.sum())
+        df = df[~bad_start].reset_index(drop=True)
         if df.empty:
             return [], invalid
 
@@ -123,6 +130,12 @@ def _build_records(df, app_id, tag_id, event_name, now, gpsgate_application_id):
         df["v_date"] = df["v_time"]
 
     bad_dt = df["v_date"].isna() | df["v_time"].isna()
+    if bad_dt.any():
+        for idx in df[bad_dt].index:
+            reason = []
+            if pd.isna(df.loc[idx, "v_date"]): reason.append("bad_date")
+            if pd.isna(df.loc[idx, "v_time"]): reason.append("bad_time")
+            logger.warning(f"[INVALID] {event_name} row={idx} reason={'+'.join(reason)} raw={df.loc[idx].to_dict()}")
     invalid += int(bad_dt.sum())
     df = df[~bad_dt].reset_index(drop=True)
     if df.empty:
