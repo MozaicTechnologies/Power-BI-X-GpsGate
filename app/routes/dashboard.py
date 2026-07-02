@@ -563,25 +563,53 @@ def get_recent_jobs():
 @dashboard_bp.route('/stats/table-counts', methods=['GET'])
 @login_required
 def get_table_counts():
-    """Get record counts for all fact and dimension tables in a single query."""
+    """Get record counts for all fact and dimension tables in a single query.
+    Optional ?application_id=X filters to a specific customer.
+    """
     try:
-        sql = text("""
-            SELECT 'Trip'           AS tbl, COUNT(*) AS cnt FROM fact_trip
-            UNION ALL SELECT 'Speeding',     COUNT(*) FROM fact_speeding
-            UNION ALL SELECT 'Idle',         COUNT(*) FROM fact_idle
-            UNION ALL SELECT 'AWH',          COUNT(*) FROM fact_awh
-            UNION ALL SELECT 'WH',           COUNT(*) FROM fact_wh
-            UNION ALL SELECT 'HA',           COUNT(*) FROM fact_ha
-            UNION ALL SELECT 'HB',           COUNT(*) FROM fact_hb
-            UNION ALL SELECT 'WU',           COUNT(*) FROM fact_wu
-            UNION ALL SELECT 'Drivers',      COUNT(*) FROM dim_drivers
-            UNION ALL SELECT 'Vehicles',     COUNT(*) FROM dim_vehicles
-            UNION ALL SELECT 'Tags',         COUNT(*) FROM dim_tags
-            UNION ALL SELECT 'Reports',      COUNT(*) FROM dim_reports
-            UNION ALL SELECT 'EventRules',   COUNT(*) FROM dim_event_rules
-            UNION ALL SELECT 'CustomFields', COUNT(*) FROM dim_vehicle_custom_fields
-        """)
-        rows = db.session.execute(sql).fetchall()
+        application_id = request.args.get('application_id', type=int)
+
+        if application_id:
+            gpsgate_app = GpsGateApplication.query.filter_by(application_id=application_id).first()
+            if not gpsgate_app:
+                return jsonify({'success': False, 'error': f'No application found for id={application_id}'}), 404
+            pk_id = gpsgate_app.id
+
+            sql = text("""
+                SELECT 'Trip'           AS tbl, COUNT(*) AS cnt FROM fact_trip           WHERE gpsgate_application_id = :pk_id
+                UNION ALL SELECT 'Speeding',     COUNT(*) FROM fact_speeding     WHERE gpsgate_application_id = :pk_id
+                UNION ALL SELECT 'Idle',         COUNT(*) FROM fact_idle         WHERE gpsgate_application_id = :pk_id
+                UNION ALL SELECT 'AWH',          COUNT(*) FROM fact_awh          WHERE gpsgate_application_id = :pk_id
+                UNION ALL SELECT 'WH',           COUNT(*) FROM fact_wh           WHERE gpsgate_application_id = :pk_id
+                UNION ALL SELECT 'HA',           COUNT(*) FROM fact_ha           WHERE gpsgate_application_id = :pk_id
+                UNION ALL SELECT 'HB',           COUNT(*) FROM fact_hb           WHERE gpsgate_application_id = :pk_id
+                UNION ALL SELECT 'WU',           COUNT(*) FROM fact_wu           WHERE gpsgate_application_id = :pk_id
+                UNION ALL SELECT 'Drivers',      COUNT(*) FROM dim_drivers       WHERE application_id = :app_id
+                UNION ALL SELECT 'Vehicles',     COUNT(*) FROM dim_vehicles      WHERE application_id = :app_id
+                UNION ALL SELECT 'Tags',         COUNT(*) FROM dim_tags          WHERE application_id = :app_id
+                UNION ALL SELECT 'Reports',      COUNT(*) FROM dim_reports       WHERE application_id = :app_id
+                UNION ALL SELECT 'EventRules',   COUNT(*) FROM dim_event_rules   WHERE application_id = :app_id
+                UNION ALL SELECT 'CustomFields', COUNT(*) FROM dim_vehicle_custom_fields WHERE application_id = :app_id
+            """)
+            rows = db.session.execute(sql, {'pk_id': pk_id, 'app_id': application_id}).fetchall()
+        else:
+            sql = text("""
+                SELECT 'Trip'           AS tbl, COUNT(*) AS cnt FROM fact_trip
+                UNION ALL SELECT 'Speeding',     COUNT(*) FROM fact_speeding
+                UNION ALL SELECT 'Idle',         COUNT(*) FROM fact_idle
+                UNION ALL SELECT 'AWH',          COUNT(*) FROM fact_awh
+                UNION ALL SELECT 'WH',           COUNT(*) FROM fact_wh
+                UNION ALL SELECT 'HA',           COUNT(*) FROM fact_ha
+                UNION ALL SELECT 'HB',           COUNT(*) FROM fact_hb
+                UNION ALL SELECT 'WU',           COUNT(*) FROM fact_wu
+                UNION ALL SELECT 'Drivers',      COUNT(*) FROM dim_drivers
+                UNION ALL SELECT 'Vehicles',     COUNT(*) FROM dim_vehicles
+                UNION ALL SELECT 'Tags',         COUNT(*) FROM dim_tags
+                UNION ALL SELECT 'Reports',      COUNT(*) FROM dim_reports
+                UNION ALL SELECT 'EventRules',   COUNT(*) FROM dim_event_rules
+                UNION ALL SELECT 'CustomFields', COUNT(*) FROM dim_vehicle_custom_fields
+            """)
+            rows = db.session.execute(sql).fetchall()
 
         fact_keys = {'Trip', 'Speeding', 'Idle', 'AWH', 'WH', 'HA', 'HB', 'WU'}
         fact_counts: dict = {}
@@ -590,11 +618,12 @@ def get_table_counts():
             (fact_counts if tbl in fact_keys else dim_counts)[tbl] = int(cnt)
 
         return jsonify({
-            'success':   True,
-            'counts':    fact_counts,
-            'dim_counts': dim_counts,
-            'total':     sum(fact_counts.values()),
-            'timestamp': datetime.utcnow().isoformat(),
+            'success':        True,
+            'counts':         fact_counts,
+            'dim_counts':     dim_counts,
+            'total':          sum(fact_counts.values()),
+            'application_id': application_id,
+            'timestamp':      datetime.utcnow().isoformat(),
         })
 
     except Exception as e:

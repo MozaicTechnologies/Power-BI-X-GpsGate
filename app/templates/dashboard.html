@@ -216,6 +216,12 @@
             <!-- Live Statistics -->
             <div class="card">
                 <h2>📈 Live Statistics</h2>
+                <div style="margin-bottom:14px;">
+                    <label for="stats-filter-app" style="font-size:0.85rem;font-weight:600;color:#555;margin-right:8px;">Customer</label>
+                    <select id="stats-filter-app" onchange="refreshStats()" style="padding:6px 10px;border:1.5px solid #ddd;border-radius:7px;font-size:0.88rem;color:#333;">
+                        <option value="">All Customers</option>
+                    </select>
+                </div>
                 <h3 style="color: #667eea; margin-bottom: 10px; font-size: 1.1em;">Fact Tables</h3>
                 <div class="stats-grid" id="stats-grid">
                     <div class="stat-item">

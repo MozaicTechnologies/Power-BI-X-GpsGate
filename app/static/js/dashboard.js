@@ -117,6 +117,12 @@ function getSelectedApplicationId() {
                 `).join('');
                 select.innerHTML = '<option value="">Select customer</option>' + optionsHtml;
                 cleanupSelect.innerHTML = '<option value="">Select customer</option>' + optionsHtml;
+                const statsFilter = document.getElementById('stats-filter-app');
+                if (statsFilter) {
+                    const prev = statsFilter.value;
+                    statsFilter.innerHTML = '<option value="">All Customers</option>' + optionsHtml;
+                    if (prev) statsFilter.value = prev;
+                }
                 customers.forEach(c => {
                     if (c.full_token) _customerTokenMap[String(c.application_id)] = c.full_token;
                 });
@@ -270,10 +276,11 @@ async function triggerFullBackfill(event) {
 // Refresh functions
 async function refreshStats() {
     try {
-        const response = await fetch('/dashboard/stats/table-counts');
+        const appId = document.getElementById('stats-filter-app')?.value || '';
+        const url   = appId ? `/dashboard/stats/table-counts?application_id=${appId}` : '/dashboard/stats/table-counts';
+        const response = await fetch(url);
         const data = await response.json();
         if (data.success) {
-            // Fact tables
             document.getElementById('total-count').textContent = data.total.toLocaleString();
             document.getElementById('trip-count').textContent = data.counts.Trip.toLocaleString();
             document.getElementById('speeding-count').textContent = data.counts.Speeding.toLocaleString();
@@ -283,8 +290,6 @@ async function refreshStats() {
             document.getElementById('ha-count').textContent = data.counts.HA.toLocaleString();
             document.getElementById('hb-count').textContent = data.counts.HB.toLocaleString();
             document.getElementById('wu-count').textContent = data.counts.WU.toLocaleString();
-
-            // Dimension tables
             if (data.dim_counts) {
                 document.getElementById('dim-drivers-count').textContent = data.dim_counts.Drivers.toLocaleString();
                 document.getElementById('dim-vehicles-count').textContent = data.dim_counts.Vehicles.toLocaleString();
