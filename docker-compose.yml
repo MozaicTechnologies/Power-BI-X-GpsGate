@@ -59,6 +59,11 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    networks:
+      default:
+      gpsgate_shared:
+        aliases:
+          - gpsgate_db
 
 # ---------------------------------------------------------------------------
 # Application services
@@ -76,6 +81,9 @@ services:
     depends_on:
       - web
     restart: unless-stopped
+    networks:
+      - default
+      - gpsgate_shared
 
   certbot:
     <<: [*logging, *tz]
@@ -136,3 +144,8 @@ volumes:
   redis_data:
   pg_data:
   beat_data:
+
+networks:
+  default:
+  gpsgate_shared:
+    name: gpsgate_shared
