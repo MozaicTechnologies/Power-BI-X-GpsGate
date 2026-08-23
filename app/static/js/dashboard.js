@@ -423,17 +423,53 @@ function _renderJobCard(job) {
                title="Cancel this job">✕ Cancel</button>`
         : '';
 
+    const logButtons = job.job_type === 'full_backfill'
+        ? `<button onclick="viewBackfillLog('${job.id}', this)"
+               style="background:#6f42c1;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:0.78rem;cursor:pointer;margin-left:8px;"
+               title="View the dedicated Full Backfill log">📄 View Log</button>
+           <button onclick="downloadBackfillLog('${job.id}')"
+               style="background:#495057;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:0.78rem;cursor:pointer;margin-left:5px;"
+               title="Download the complete log file">⬇ Log</button>`
+        : '';
+
     return `
         <div class="job-item ${job.status}" style="border-left:4px solid ${borderColor};padding:10px 14px;margin-bottom:8px;border-radius:4px;background:#fff;">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:4px;">
                 <div>${header}</div>
-                <div style="display:flex;align-items:center;">${_jobStatusBadge(job.status)}${cancelBtn}</div>
+                <div style="display:flex;align-items:center;">${_jobStatusBadge(job.status)}${logButtons}${cancelBtn}</div>
             </div>
             ${progressHtml}
             ${statsHtml}
             ${errorHtml}
             <div style="font-size:0.78rem;color:#999;margin-top:6px;">${timing}</div>
         </div>`;
+}
+
+async function viewBackfillLog(taskId, btn) {
+    const oldText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Loading…';
+    try {
+        const response = await fetch(`/dashboard/task/${encodeURIComponent(taskId)}/log`);
+        const contentType = response.headers.get('content-type') || '';
+        if (!response.ok) {
+            const message = contentType.includes('application/json')
+                ? (await response.json()).error
+                : await response.text();
+            showMessage('error', message || 'Log is not available');
+            return;
+        }
+        openResultModal('success', await response.text());
+    } catch (error) {
+        showMessage('error', 'Failed to load log: ' + error.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = oldText;
+    }
+}
+
+function downloadBackfillLog(taskId) {
+    window.location.href = `/dashboard/task/${encodeURIComponent(taskId)}/log?download=1`;
 }
 
 async function cancelJob(taskId, btn) {

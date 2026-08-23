@@ -3,7 +3,7 @@ import time
 from app.celery_app import celery
 from app.services.customer_config import EVENT_CONFIG, load_applications
 from app.services.event_processor import iter_week_ranges, run_event_for_dates
-from app.utils.logger import setup_logger
+from app.utils.logger import setup_logger, task_log_context
 
 logger = setup_logger("TASKS")
 
@@ -118,8 +118,7 @@ def fact_sync_task(self, start_date: str, end_date: str, application_id=None):
 # Full backfill  (dimensions + facts, specific date range)
 # ---------------------------------------------------------------------------
 
-@celery.task(bind=True, name="tasks.full_backfill", track_started=True)
-def full_backfill_task(self, start_date: str, end_date: str, application_id=None):
+def _run_full_backfill(self, start_date: str, end_date: str, application_id=None):
     t0 = time.time()
     app = _get_application(application_id)
     event_types = list(EVENT_CONFIG.keys())
@@ -211,3 +210,23 @@ def full_backfill_task(self, start_date: str, end_date: str, application_id=None
         "total_failed": total_failed,
         "results": results,
     }
+
+
+@celery.task(bind=True, name="tasks.full_backfill", track_started=True)
+def full_backfill_task(self, start_date: str, end_date: str, application_id=None):
+    task_id = self.request.id or "unknown"
+    with task_log_context("full_backfill", task_id) as log_file:
+        logger.info(
+            "[full_backfill] DEDICATED LOG | task_id=%s | file=%s",
+            task_id, log_file,
+        )
+        try:
+            result = _run_full_backfill(self, start_date, end_date, application_id)
+            result["log_file"] = log_file
+            return result
+        except Exception:
+            logger.exception(
+                "[full_backfill] UNHANDLED FAILURE | task_id=%s | app=%s | %s→%s",
+                task_id, application_id, start_date, end_date,
+            )
+            raise
