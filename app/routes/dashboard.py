@@ -31,6 +31,7 @@ from app.models import (
     DimVehicleCustomFields,
 )
 from app.services.customer_config import get_event_runtime_config, load_applications, normalize_token
+from app.services.gpsgate_reports import create_report_render
 from app.utils.logger import setup_logger
 from app.config import Config
 import time as _time
@@ -1092,19 +1093,16 @@ def check_gpsgate_server_health():
             "event_id": runtime.event_id
         }
         
-        response = requests.post(
-            f"{request.url_root}render",
-            data=test_payload,
-            timeout=10
-        )
+        render_data, render_status = create_report_render(test_payload)
         
-        if response.status_code == 200:
+        if render_status == 200:
             return jsonify({
                 'status': 'healthy',
                 'message': 'GpsGate server responding normally',
                 'test_result': 'success'
             }), 200
-        elif 'reportId: 0' in response.text:
+        response_text = str(render_data.get('response') or render_data.get('error') or '')
+        if 'reportId: 0' in response_text:
             return jsonify({
                 'status': 'degraded', 
                 'message': 'GpsGate server state issue - returning reportId: 0',
@@ -1114,7 +1112,8 @@ def check_gpsgate_server_health():
         else:
             return jsonify({
                 'status': 'unknown',
-                'message': f'Unexpected response: {response.status_code}',
+                'message': f'Unexpected response: {render_status}',
+                'details': render_data.get('error'),
                 'test_result': 'unknown_error'
             }), 502
             
