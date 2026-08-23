@@ -13,12 +13,12 @@ import pandas as pd
 import json
 import numpy as np
 import time as pytime
-import os
 import io
 from app.utils.logger import setup_logger
 
 from app.models import db, Render, Result, GpsGateApplication
 from app.services.db_storage import store_event_data_to_db
+from app.services.gpsgate_reports import create_report_render, wait_for_report_result
 
 logger = setup_logger("DATA_PIPELINE")
 
@@ -33,11 +33,6 @@ pipeline_bp = Blueprint("pipeline_bp", __name__)
 # ------------------------------------------------------------------------------
 
 MAX_EXECUTION_SECONDS = 600
-
-BASE_SERVICE_URL = os.getenv("BACKEND_HOST", "http://127.0.0.1:5000")
-RENDER_URL = f"{BASE_SERVICE_URL}/render"
-RESULT_URL = f"{BASE_SERVICE_URL}/result"
-RESULT_TIMEOUT = (10, 360)
 
 MAX_WEEKS_TRIP_WH = 1
 MAX_WEEKS_OTHER = 1
@@ -290,16 +285,16 @@ def process_event_data(event_name, response_key):
                     if event_name != "Trip":
                         payload["event_id"] = event_id
 
-                    for attempt in range(2):  # Reduced attempts per report_id
-                        r = RESILIENT_SESSION.post(RENDER_URL, data=payload, timeout=(10, 60))
-                        if r.status_code == 200:
-                            render_id = r.json().get("render_id")
+                    for attempt in range(2):
+                        render_data, render_status = create_report_render(payload)
+                        if render_status == 200:
+                            render_id = render_data.get("render_id")
                             if render_id:
                                 successful_report_id = try_report_id
                                 logger.info(f"Render succeeded with report_id={try_report_id}")
                                 break
                         else:
-                            logger.warning(f"Render failed with report_id={try_report_id}, status={r.status_code}")
+                            logger.warning(f"Render failed with report_id={try_report_id}, status={render_status}")
                         pytime.sleep(2)
 
                     if render_id:
@@ -341,20 +336,20 @@ def process_event_data(event_name, response_key):
                 gdrive_link = None
                 result_started_at = pytime.time()
                 logger.info(
-                    f"Calling /result event={event_name} render_id={render_id} "
-                    f"timeout={RESULT_TIMEOUT[1]}s max_attempts=3"
+                    f"Polling GpsGate result directly event={event_name} "
+                    f"render_id={render_id} max_wait=300s max_attempts=3"
                 )
                 for attempt in range(1, 4):
                     logger.info(
-                        f"/result attempt={attempt}/3 event={event_name} render_id={render_id}"
+                        f"Result poll attempt={attempt}/3 event={event_name} render_id={render_id}"
                     )
-                    res = requests.post(RESULT_URL, data=payload, timeout=RESULT_TIMEOUT)
+                    result_data, result_status = wait_for_report_result(payload)
                     logger.info(
-                        f"/result response attempt={attempt}/3 event={event_name} "
-                        f"render_id={render_id} status={res.status_code}"
+                        f"Result poll response attempt={attempt}/3 event={event_name} "
+                        f"render_id={render_id} status={result_status}"
                     )
-                    if res.status_code == 200:
-                        gdrive_link = res.json().get("gdrive_link")
+                    if result_status == 200:
+                        gdrive_link = result_data.get("gdrive_link")
                         if gdrive_link:
                             elapsed = pytime.time() - result_started_at
                             logger.info(
