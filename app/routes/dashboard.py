@@ -949,32 +949,51 @@ _BROWSE_TABLE_MAP = {
     'dim_vehicle_custom_fields': DimVehicleCustomFields,
 }
 
+_browse_count_cache = {"counts": None, "estimated": False, "ts": 0.0}
+_BROWSE_COUNT_TTL = 60.0
+
+
+def _get_fast_browse_counts(force=False):
+    """Return cheap row-count estimates for the DB browser.
+
+    PostgreSQL's pg_stat_user_tables is updated by ANALYZE/autovacuum and avoids
+    scanning every large fact table. Non-PostgreSQL development databases fall
+    back to exact counts because they are normally small.
+    """
+    now = _time.monotonic()
+    cached = _browse_count_cache["counts"]
+    if not force and cached is not None and now - _browse_count_cache["ts"] < _BROWSE_COUNT_TTL:
+        return cached, _browse_count_cache["estimated"]
+
+    table_names = tuple(_BROWSE_TABLE_MAP)
+    if db.engine.dialect.name == "postgresql":
+        rows = db.session.execute(text("""
+            SELECT relname, n_live_tup::bigint
+            FROM pg_stat_user_tables
+            WHERE relname = ANY(:table_names)
+        """), {"table_names": list(table_names)}).fetchall()
+        counts = {name: max(0, int(count or 0)) for name, count in rows}
+        counts = {name: counts.get(name, 0) for name in table_names}
+        estimated = True
+    else:
+        counts = {
+            name: int(db.session.query(func.count()).select_from(model).scalar() or 0)
+            for name, model in _BROWSE_TABLE_MAP.items()
+        }
+        estimated = False
+
+    _browse_count_cache.update(counts=counts, estimated=estimated, ts=now)
+    return counts, estimated
+
 
 @dashboard_bp.route('/browse', methods=['GET'])
 @login_required
 def list_browse_tables():
-    """Return all browseable tables with their row counts in a single query."""
+    """Return browseable tables without scanning every fact table."""
     try:
-        sql = text("""
-            SELECT 'gpsgate_application'        AS tbl, COUNT(*) AS cnt FROM gpsgate_application
-            UNION ALL SELECT 'fact_trip',                COUNT(*) FROM fact_trip
-            UNION ALL SELECT 'fact_speeding',            COUNT(*) FROM fact_speeding
-            UNION ALL SELECT 'fact_idle',                COUNT(*) FROM fact_idle
-            UNION ALL SELECT 'fact_awh',                 COUNT(*) FROM fact_awh
-            UNION ALL SELECT 'fact_wh',                  COUNT(*) FROM fact_wh
-            UNION ALL SELECT 'fact_ha',                  COUNT(*) FROM fact_ha
-            UNION ALL SELECT 'fact_hb',                  COUNT(*) FROM fact_hb
-            UNION ALL SELECT 'fact_wu',                  COUNT(*) FROM fact_wu
-            UNION ALL SELECT 'dim_tags',                 COUNT(*) FROM dim_tags
-            UNION ALL SELECT 'dim_event_rules',          COUNT(*) FROM dim_event_rules
-            UNION ALL SELECT 'dim_reports',              COUNT(*) FROM dim_reports
-            UNION ALL SELECT 'dim_vehicles',             COUNT(*) FROM dim_vehicles
-            UNION ALL SELECT 'dim_drivers',              COUNT(*) FROM dim_drivers
-            UNION ALL SELECT 'dim_vehicle_custom_fields', COUNT(*) FROM dim_vehicle_custom_fields
-        """)
-        rows = db.session.execute(sql).fetchall()
-        tables = [{'name': tbl, 'count': int(cnt)} for tbl, cnt in rows]
-        return jsonify({'success': True, 'tables': tables})
+        counts, estimated = _get_fast_browse_counts()
+        tables = [{'name': name, 'count': counts[name]} for name in _BROWSE_TABLE_MAP]
+        return jsonify({'success': True, 'tables': tables, 'counts_estimated': estimated})
     except Exception:
         db.session.rollback()
         logger.exception("list_browse_tables failed")
@@ -1014,8 +1033,19 @@ def browse_table(table_name):
     per_page = min(100, max(10, request.args.get('per_page', 50, type=int)))
 
     try:
-        total  = db.session.query(func.count()).select_from(model).scalar() or 0
-        db_rows = db.session.query(model).offset((page - 1) * per_page).limit(per_page).all()
+        counts, estimated = _get_fast_browse_counts()
+        total = counts.get(table_name, 0)
+        query = db.session.query(model)
+        primary_key = list(model.__table__.primary_key.columns)
+        if primary_key:
+            query = query.order_by(*primary_key)
+        offset = (page - 1) * per_page
+        page_rows = query.offset(offset).limit(per_page + 1).all()
+        has_more = len(page_rows) > per_page
+        db_rows = page_rows[:per_page]
+        # Statistics can lag behind recent writes. Never report fewer rows than
+        # this request has proved exist, and expose a next page when applicable.
+        total = max(total, offset + len(db_rows) + (1 if has_more else 0))
         columns = [c.name for c in model.__table__.columns]
         rows = []
         for row in db_rows:
@@ -1028,6 +1058,7 @@ def browse_table(table_name):
             'success':  True,
             'table':    table_name,
             'total':    total,
+            'total_is_estimate': estimated,
             'page':     page,
             'per_page': per_page,
             'pages':    max(1, (total + per_page - 1) // per_page),

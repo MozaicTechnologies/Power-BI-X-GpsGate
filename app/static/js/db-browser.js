@@ -7,6 +7,8 @@ const DB_TABLE_GROUPS = [
 ];
 
 let _tableCounts   = {};
+let _countsEstimated = false;
+let _tableListLoadedAt = 0;
 let _browserState  = { table: null, page: 1, per_page: 50, columns: [], totalPages: 1, total: 0 };
 
 // ── Sidebar open/close ────────────────────────────────────────────────────────
@@ -20,7 +22,9 @@ function toggleSidebar() {
     } else {
         sidebar.classList.add('open');
         overlay.classList.add('open');
-        loadTableList();
+        // Paint the menu immediately; refresh counts only when cache is stale.
+        renderSidebarGroups(document.getElementById('db-sidebar-body'));
+        if (Date.now() - _tableListLoadedAt > 60000) loadTableList();
     }
 }
 
@@ -33,12 +37,13 @@ function closeSidebar() {
 
 async function loadTableList() {
     const body = document.getElementById('db-sidebar-body');
-    body.innerHTML = '<p style="padding:10px;color:#aaa;">Loading…</p>';
     try {
         const res  = await fetch('/dashboard/browse');
         const data = await res.json();
         if (!data.success) { body.innerHTML = '<p style="color:#f66;padding:10px;">Failed to load</p>'; return; }
         data.tables.forEach(t => { _tableCounts[t.name] = t.count; });
+        _countsEstimated = Boolean(data.counts_estimated);
+        _tableListLoadedAt = Date.now();
         renderSidebarGroups(body);
     } catch (e) {
         body.innerHTML = '<p style="color:#f66;padding:10px;">Error: ' + e.message + '</p>';
@@ -51,7 +56,7 @@ function renderSidebarGroups(container) {
             <div class="db-sidebar-group-label">${group.label}</div>
             ${group.tables.map(t => {
                 const count = _tableCounts[t];
-                const countStr = count == null ? '?' : count >= 0 ? count.toLocaleString() : 'err';
+                const countStr = count == null ? '…' : count >= 0 ? `${_countsEstimated ? '~' : ''}${count.toLocaleString()}` : 'err';
                 return `<div class="db-sidebar-item" onclick="openBrowser('${t}')">
                     <span class="db-sidebar-table-name">${t}</span>
                     <span class="db-sidebar-count">${countStr}</span>
@@ -96,6 +101,7 @@ async function fetchBrowserPage() {
         _browserState.columns    = data.columns;
         _browserState.totalPages = data.pages;
         _browserState.total      = data.total;
+        _browserState.totalIsEstimate = Boolean(data.total_is_estimate);
 
         // Header
         thead.innerHTML = '<tr>' + data.columns.map(c => `<th>${c}</th>`).join('') + '<th style="width:50px;"></th></tr>';
@@ -121,7 +127,8 @@ async function fetchBrowserPage() {
         // Status
         const from = (page - 1) * per_page + 1;
         const to   = Math.min(page * per_page, data.total);
-        status.textContent = `Showing ${from}–${to} of ${data.total.toLocaleString()} rows  |  Page ${page} / ${data.pages}`;
+        const approx = data.total_is_estimate ? '~' : '';
+        status.textContent = `Showing ${from}–${to} of ${approx}${data.total.toLocaleString()} rows  |  Page ${page} / ${data.pages}`;
 
         renderPagination();
     } catch (e) {
