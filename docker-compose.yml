@@ -95,7 +95,7 @@ services:
 
   web:
     <<: [*app-build, *app-env, *logging]
-    command: gunicorn wsgi:app --bind 0.0.0.0:5000 --workers 2 --reload --timeout 120
+    command: gunicorn wsgi:app --bind 0.0.0.0:5000 --workers 10 --timeout 120
     depends_on:
       db:
         condition: service_healthy
