@@ -8,8 +8,6 @@ from flask_login import login_required
 from datetime import datetime, timedelta
 from sqlalchemy import func, text
 from urllib.parse import urljoin
-from pathlib import Path
-import re
 import traceback
 import requests
 import os
@@ -450,40 +448,6 @@ def get_task_status(task_id):
         'info':     info,
         'result':   result.result if result.state == 'SUCCESS' else None,
     })
-
-
-@dashboard_bp.route('/task/<task_id>/log', methods=['GET'])
-@login_required
-def get_full_backfill_log(task_id):
-    """View or download the dedicated log for one Full Backfill task."""
-    if not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', task_id):
-        return jsonify({'success': False, 'error': 'Invalid task id'}), 400
-
-    log_dir = (Path.cwd() / 'logs' / 'full_backfill').resolve()
-    matches = sorted(log_dir.glob(f'full_backfill_*_{task_id}.log'), reverse=True)
-    if not matches:
-        return jsonify({
-            'success': False,
-            'error': 'Log file is not available yet. The task may still be queued or predates dedicated logging.'
-        }), 404
-
-    log_file = matches[0].resolve()
-    if log_dir not in log_file.parents:
-        return jsonify({'success': False, 'error': 'Invalid log path'}), 400
-
-    if request.args.get('download') == '1':
-        from flask import send_file
-        return send_file(log_file, as_attachment=True, download_name=log_file.name)
-
-    max_bytes = 1024 * 1024
-    size = log_file.stat().st_size
-    with log_file.open('rb') as stream:
-        if size > max_bytes:
-            stream.seek(-max_bytes, 2)
-        content = stream.read().decode('utf-8', errors='replace')
-    if size > max_bytes:
-        content = '[Showing the last 1 MB. Use Download Log for the complete file.]\n\n' + content
-    return content, 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
 
 @dashboard_bp.route('/status/recent', methods=['GET'])

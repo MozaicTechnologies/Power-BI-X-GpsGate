@@ -3,8 +3,6 @@ import coloredlogs
 import os
 import sys
 import re
-from contextlib import contextmanager
-from contextvars import ContextVar
 from datetime import datetime
 
 _FMT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -24,9 +22,6 @@ _COLOR_FIELD_STYLES = {
 
 _shared_file_handler: logging.FileHandler | None = None
 _dedicated_file_handlers: dict[str, logging.FileHandler] = {}
-_task_file_handler: ContextVar[logging.FileHandler | None] = ContextVar(
-    "task_file_handler", default=None
-)
 
 
 def _get_numeric_level(level: str | None = None) -> int:
@@ -54,10 +49,7 @@ def setup_logger(name: str, level: str = None) -> logging.Logger:
     Set LOG_LEVEL env var to DEBUG/INFO/WARNING/ERROR to control verbosity.
     """
     logger = logging.getLogger(name)
-    task_handler = _task_file_handler.get()
     if logger.handlers:
-        if task_handler is not None and task_handler not in logger.handlers:
-            logger.addHandler(task_handler)
         return logger
 
     numeric_level = _get_numeric_level(level)
@@ -112,40 +104,3 @@ def setup_dedicated_file_logger(
     if handler not in logger.handlers:
         logger.addHandler(handler)
     return logger
-
-
-@contextmanager
-def task_log_context(task_type: str, task_id: str):
-    """Copy logs emitted during one Celery task to a dedicated file."""
-    safe_type = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(task_type))
-    safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(task_id))
-    task_dir = os.path.join("logs", safe_type)
-    os.makedirs(task_dir, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = os.path.join(task_dir, f"{safe_type}_{timestamp}_{safe_id}.log")
-
-    handler = logging.FileHandler(path, encoding="utf-8")
-    # INFO is intentional: DEBUG payloads may contain customer tokens.
-    handler.setLevel(logging.INFO)
-    handler.setFormatter(logging.Formatter(_FMT))
-    token = _task_file_handler.set(handler)
-
-    attached = []
-    for value in logging.Logger.manager.loggerDict.values():
-        # Propagating loggers are captured by root; attaching to both would
-        # duplicate every line in the dedicated file.
-        if isinstance(value, logging.Logger) and not value.propagate and handler not in value.handlers:
-            value.addHandler(handler)
-            attached.append(value)
-    root = logging.getLogger()
-    if handler not in root.handlers:
-        root.addHandler(handler)
-        attached.append(root)
-
-    try:
-        yield os.path.abspath(path)
-    finally:
-        _task_file_handler.reset(token)
-        for target in attached:
-            target.removeHandler(handler)
-        handler.close()
