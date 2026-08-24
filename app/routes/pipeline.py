@@ -6,21 +6,25 @@ retry-safe downloads, and DB insertion.
 
 from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta, timezone
+import hashlib
+import io
+import json
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from urllib.parse import urlsplit
 import pandas as pd
-import json
 import numpy as np
 import time as pytime
-import io
-from app.utils.logger import setup_logger
+import uuid
+from app.utils.logger import setup_dedicated_file_logger, setup_logger
 
 from app.models import db, Render, Result, GpsGateApplication
 from app.services.db_storage import store_event_data_to_db
 from app.services.gpsgate_reports import create_report_render, wait_for_report_result
 
 logger = setup_logger("DATA_PIPELINE")
+trip_logger = setup_dedicated_file_logger("TRIP_PIPELINE", "trip_pipeline")
 
 # ------------------------------------------------------------------------------
 # BLUEPRINT
@@ -58,11 +62,9 @@ def create_resilient_session():
 RESILIENT_SESSION = create_resilient_session()
 
 
-import io
-import pandas as pd
-
-def clean_csv_data(file_bytes):
+def clean_csv_data(file_bytes, event_name=None, trace_id=None):
     encodings = ("utf-8", "utf-8-sig", "cp1252", "latin1")
+    diagnostic = trip_logger if event_name == "Trip" else None
 
     def _read_csv(enc, skip):
         return pd.read_csv(
@@ -80,10 +82,21 @@ def clean_csv_data(file_bytes):
             # 1) First attempt (your current behavior)
             df = _read_csv(enc, skip=8)
 
+            if diagnostic:
+                diagnostic.info(
+                    "trace=%s stage=csv_parse encoding=%s skiprows=8 rows=%d columns=%s",
+                    trace_id, enc, len(df), list(df.columns),
+                )
+
             # If skiprows=8 caused header issues (common in messy exports), retry
             if df is None or df.empty or len(df.columns) <= 1:
                 logger.warning(f"CSV looks empty/invalid after skiprows=8, retrying skiprows=0 (encoding={enc})")
                 df = _read_csv(enc, skip=0)
+                if diagnostic:
+                    diagnostic.warning(
+                        "trace=%s stage=csv_parse retry=skiprows_0 encoding=%s rows=%d columns=%s",
+                        trace_id, enc, len(df), list(df.columns),
+                    )
 
             # ---- Clean / normalize columns
             df.columns = [
@@ -112,22 +125,54 @@ def clean_csv_data(file_bytes):
                     f"CSV missing Vehicle column (encoding tried: {enc}). "
                     f"Available columns: {list(df.columns)}"
                 )
+                if diagnostic:
+                    diagnostic.error(
+                        "trace=%s stage=csv_validate reason=missing_vehicle columns=%s",
+                        trace_id, list(df.columns),
+                    )
                 return None
+
+            if diagnostic:
+                expected = ["Vehicle", "Start Time", "Stop Time", "Duration (s)", "Distance (GPS)"]
+                missing = [column for column in expected if column not in df.columns]
+                diagnostic.log(
+                    30 if "Start Time" in missing else 20,
+                    "trace=%s stage=csv_validate rows=%d missing_expected=%s columns=%s",
+                    trace_id, len(df), missing, list(df.columns),
+                )
 
             # ---- Clean rows with missing vehicle
             df["Vehicle"] = df["Vehicle"].astype(str)
             df = df[df["Vehicle"].notna() & (df["Vehicle"].str.strip() != "")]
             df = df.reset_index(drop=True)
 
+            if diagnostic:
+                diagnostic.info(
+                    "trace=%s stage=csv_clean rows_after_vehicle_filter=%d vehicle_blank=%d start_time_blank=%s",
+                    trace_id,
+                    len(df),
+                    int((df["Vehicle"].str.strip() == "").sum()),
+                    int(df["Start Time"].fillna("").astype(str).str.strip().eq("").sum())
+                    if "Start Time" in df.columns else "column_missing",
+                )
+
             return df
 
         except UnicodeDecodeError:
+            if diagnostic:
+                diagnostic.info("trace=%s stage=csv_decode encoding=%s result=unicode_error", trace_id, enc)
             continue
         except Exception as e:
             logger.exception(f"CSV clean failed (encoding={enc}): {e}")
+            if diagnostic:
+                diagnostic.exception(
+                    "trace=%s stage=csv_parse encoding=%s result=exception", trace_id, enc
+                )
             return None
 
     logger.error("CSV decode failed for all encodings tried")
+    if diagnostic:
+        diagnostic.error("trace=%s stage=csv_decode result=all_encodings_failed", trace_id)
     return None
 
 
@@ -185,7 +230,11 @@ def download_with_retry(url, headers, max_attempts=3):
             )
             resp.raise_for_status()
             content = b"".join(resp.iter_content(chunk_size=512 * 1024))
-            logger.info(f"Downloaded bytes={len(content)} url={url}")
+            parsed_url = urlsplit(str(url))
+            logger.info(
+                "Downloaded bytes=%d source=%s%s",
+                len(content), parsed_url.netloc, parsed_url.path,
+            )
             return content
         except Exception as e:
             logger.warning(f"Download attempt {attempt} failed: {e}")
@@ -199,9 +248,13 @@ def download_with_retry(url, headers, max_attempts=3):
 def process_event_data(event_name, response_key):
     start_time = pytime.time()
     data = request.get_json(silent=True) or request.form or {}
+    trace_id = uuid.uuid4().hex[:12] if event_name == "Trip" else None
 
     logger.info(f"START event={event_name}")
-    logger.debug(f"Payload={json.dumps(data, default=str)}")
+    safe_data = dict(data)
+    if safe_data.get("token"):
+        safe_data["token"] = "<redacted>"
+    logger.debug(f"Payload={json.dumps(safe_data, default=str)}")
 
     app_id = data.get("app_id")
     token = data.get("token")
@@ -210,6 +263,13 @@ def process_event_data(event_name, response_key):
     event_id = data.get("event_id")
 
     report_id = data.get("report_id")
+
+    if event_name == "Trip":
+        trip_logger.info(
+            "trace=%s stage=start app_id=%s report_id=%s tag_id=%s period_start=%s period_end=%s base_host=%s",
+            trace_id, app_id, report_id, tag_id, data.get("period_start"), data.get("period_end"),
+            urlsplit(str(base_url or "")).netloc,
+        )
     
     # Fallback report IDs - only use VERIFIED IDs from your system
     fallback_report_ids = {
@@ -219,13 +279,30 @@ def process_event_data(event_name, response_key):
 
     if not all([app_id, token, base_url, tag_id]):
         logger.error("Missing required parameters")
+        if event_name == "Trip":
+            missing = [key for key, value in {
+                "app_id": app_id, "token": token, "base_url": base_url, "tag_id": tag_id,
+            }.items() if not value]
+            trip_logger.error("trace=%s stage=validate reason=missing_parameters fields=%s", trace_id, missing)
         return jsonify({"error": "Missing required parameters"}), 400
 
     gpsgate_app = GpsGateApplication.query.filter_by(application_id=int(app_id or 0)).first()
     if not gpsgate_app:
         logger.error(f"No gpsgate_application found for app_id={app_id}")
+        if event_name == "Trip":
+            trip_logger.error(
+                "trace=%s stage=config reason=application_not_found app_id=%s", trace_id, app_id
+            )
         return jsonify({"error": f"No gpsgate_application found for app_id={app_id}"}), 404
     gpsgate_application_id = gpsgate_app.id
+
+    if event_name == "Trip":
+        trip_logger.info(
+            "trace=%s stage=config db_pk=%s configured_report_name=%r configured_report_id=%s configured_tag_name=%r configured_tag_id=%s caller_matches_config=%s",
+            trace_id, gpsgate_application_id, gpsgate_app.trip_report_name,
+            gpsgate_app.trip_report_id, gpsgate_app.tag_name, gpsgate_app.tag_id,
+            str(report_id) == str(gpsgate_app.trip_report_id) and str(tag_id) == str(gpsgate_app.tag_id),
+        )
 
     weeks = resolve_weeks(data, 1)
     totals = {"raw": 0, "inserted": 0, "skipped": 0, "failed": 0}
@@ -235,6 +312,11 @@ def process_event_data(event_name, response_key):
         try:
             render_id = None
             successful_report_id = None
+            if event_name == "Trip":
+                trip_logger.info(
+                    "trace=%s stage=window period_start=%s period_end=%s",
+                    trace_id, week["week_start"], week["week_end"],
+                )
             
             # Prefer the caller's configured report_id. Only use hardcoded fallbacks when none was supplied.
             if report_id:
@@ -254,6 +336,12 @@ def process_event_data(event_name, response_key):
                     report_id=str(try_report_id),
                     event_id=str(event_id) if event_name != "Trip" else None
                 ).first()
+
+                if event_name == "Trip":
+                    trip_logger.info(
+                        "trace=%s stage=render_lookup report_id=%s cached=%s cached_render_id=%s",
+                        trace_id, try_report_id, bool(render), render.render_id if render else None,
+                    )
 
                 if render:
                     cached_result = Result.query.filter_by(render_id=str(render.render_id)).first()
@@ -287,6 +375,14 @@ def process_event_data(event_name, response_key):
 
                     for attempt in range(2):
                         render_data, render_status = create_report_render(payload)
+                        if event_name == "Trip":
+                            trip_logger.log(
+                                20 if render_status == 200 else 30,
+                                "trace=%s stage=render_create attempt=%d status=%s response_keys=%s error=%r",
+                                trace_id, attempt + 1, render_status,
+                                sorted(render_data.keys()) if isinstance(render_data, dict) else [],
+                                render_data.get("error") if isinstance(render_data, dict) else None,
+                            )
                         if render_status == 200:
                             render_id = render_data.get("render_id")
                             if render_id:
@@ -302,6 +398,10 @@ def process_event_data(event_name, response_key):
                         
             if not render_id:
                 logger.error("Render failed for all report IDs")
+                if event_name == "Trip":
+                    trip_logger.error(
+                        "trace=%s stage=render result=failed report_ids=%s", trace_id, report_ids_to_try
+                    )
                 continue
 
             # Store the successful render record if it's not cached
@@ -325,6 +425,8 @@ def process_event_data(event_name, response_key):
             result = Result.query.filter_by(render_id=str(render_id)).first()
             if result and result.gdrive_link:
                 gdrive_link = result.gdrive_link
+                if event_name == "Trip":
+                    trip_logger.info("trace=%s stage=result source=cache render_id=%s", trace_id, render_id)
             else:
                 payload = {
                     "app_id": app_id,
@@ -344,6 +446,14 @@ def process_event_data(event_name, response_key):
                         f"Result poll attempt={attempt}/3 event={event_name} render_id={render_id}"
                     )
                     result_data, result_status = wait_for_report_result(payload)
+                    if event_name == "Trip":
+                        trip_logger.log(
+                            20 if result_status == 200 else 30,
+                            "trace=%s stage=result_poll attempt=%d status=%s ready_link=%s error=%r",
+                            trace_id, attempt, result_status,
+                            bool(result_data.get("gdrive_link")) if isinstance(result_data, dict) else False,
+                            result_data.get("error") if isinstance(result_data, dict) else None,
+                        )
                     logger.info(
                         f"Result poll response attempt={attempt}/3 event={event_name} "
                         f"render_id={render_id} status={result_status}"
@@ -365,22 +475,37 @@ def process_event_data(event_name, response_key):
                         f"Result fetch failed event={event_name} render_id={render_id} "
                         f"elapsed={elapsed:.1f}s"
                     )
+                    if event_name == "Trip":
+                        trip_logger.error(
+                            "trace=%s stage=result result=no_output_link render_id=%s elapsed=%.1f",
+                            trace_id, render_id, elapsed,
+                        )
                     continue
 
             # ---------------- DOWNLOAD ----------------
             headers = {"Authorization": token} if "omantracking2.com" in gdrive_link else {}
             csv_bytes = download_with_retry(gdrive_link, headers)
+            if event_name == "Trip":
+                trip_logger.info(
+                    "trace=%s stage=download bytes=%d sha256=%s source_host=%s",
+                    trace_id, len(csv_bytes), hashlib.sha256(csv_bytes).hexdigest(),
+                    urlsplit(str(gdrive_link)).netloc,
+                )
 
             # ---------------- CLEAN ----------------
-            raw_df = clean_csv_data(csv_bytes)
+            raw_df = clean_csv_data(csv_bytes, event_name=event_name, trace_id=trace_id)
             if raw_df is None or raw_df.empty:
                 logger.warning("Empty CSV after clean")
+                if event_name == "Trip":
+                    trip_logger.error("trace=%s stage=csv_clean result=empty", trace_id)
                 continue
 
             totals["raw"] += len(raw_df)
 
             # ---------------- STORE ----------------
-            stats = store_event_data_to_db(raw_df, app_id, tag_id, event_name, gpsgate_application_id)
+            stats = store_event_data_to_db(
+                raw_df, app_id, tag_id, event_name, gpsgate_application_id, trace_id=trace_id
+            )
             totals["inserted"] += stats["inserted"]
             totals["skipped"] += stats["skipped"]
             totals["failed"] += stats["failed"]
@@ -393,13 +518,30 @@ def process_event_data(event_name, response_key):
                 f"duplicate_rows_skipped={stats.get('duplicate_rows_skipped', 0)} "
                 f"failed={stats['failed']}"
             )
+            if event_name == "Trip":
+                trip_logger.info(
+                    "trace=%s stage=store result=complete raw=%d inserted=%d skipped=%d invalid=%d duplicates=%d failed=%d",
+                    trace_id, len(raw_df), stats["inserted"], stats["skipped"],
+                    stats.get("invalid_rows_skipped", 0),
+                    stats.get("duplicate_rows_skipped", 0), stats["failed"],
+                )
 
             weeks_processed += 1
 
         except Exception as e:
             logger.exception(f"{event_name} week failed: {e}")
+            if event_name == "Trip":
+                trip_logger.exception(
+                    "trace=%s stage=window result=unhandled_exception period_start=%s period_end=%s",
+                    trace_id, week.get("week_start"), week.get("week_end"),
+                )
 
     logger.info(f"END event={event_name} totals={totals}")
+    if event_name == "Trip":
+        trip_logger.info(
+            "trace=%s stage=end weeks_processed=%d totals=%s elapsed=%.1f",
+            trace_id, weeks_processed, totals, pytime.time() - start_time,
+        )
 
     return jsonify({
         "message": "Success",

@@ -1,10 +1,11 @@
 import pandas as pd
 from datetime import datetime
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from app.utils.logger import setup_logger
+from app.utils.logger import setup_dedicated_file_logger, setup_logger
 from app.models import db, FactTrip, FactSpeeding, FactIdle, FactAWH, FactWH, FactHA, FactHB, FactWU
 
 logger = setup_logger("DATA_PIPELINE")
+trip_logger = setup_dedicated_file_logger("TRIP_PIPELINE", "trip_pipeline")
 
 # Change 2: number of rows per INSERT batch
 CHUNK_SIZE = 5_000
@@ -49,7 +50,7 @@ def _to_dt(df, col):
 # Change 1: vectorized record building (itertuples >> iterrows)
 # ---------------------------------------------------------------------------
 
-def _build_records(df, app_id, tag_id, event_name, now, gpsgate_application_id):
+def _build_records(df, app_id, tag_id, event_name, now, gpsgate_application_id, trace_id=None):
     """
     Build a list of insert-ready dicts using vectorized pandas ops + itertuples.
     itertuples is ~50x faster than iterrows for large DataFrames.
@@ -77,14 +78,27 @@ def _build_records(df, app_id, tag_id, event_name, now, gpsgate_application_id):
     # TRIP
     # ---------------------------------------------------------------
     if event_name == "Trip":
+        required = ["Vehicle", "Start Time"]
+        missing = [column for column in required if column not in df.columns]
+        trip_logger.log(
+            30 if missing else 20,
+            "trace=%s stage=db_build input_rows=%d missing_required=%s columns=%s",
+            trace_id, len(df), missing, list(df.columns),
+        )
         df["v_start"] = _to_dt(df, "Start Time")
         bad_start = df["v_start"].isna()
+        trip_logger.log(
+            30 if bad_start.any() else 20,
+            "trace=%s stage=db_build start_time_parse valid=%d invalid=%d",
+            trace_id, int((~bad_start).sum()), int(bad_start.sum()),
+        )
         if bad_start.any():
             for idx in df[bad_start].index:
                 logger.warning(f"[INVALID] Trip row={idx} reason=bad_start_time raw={df.loc[idx].to_dict()}")
         invalid += int(bad_start.sum())
         df = df[~bad_start].reset_index(drop=True)
         if df.empty:
+            trip_logger.error("trace=%s stage=db_build result=no_valid_trip_rows", trace_id)
             return [], invalid
 
         df["v_stop"]   = _to_dt(df, "Stop Time")
@@ -114,6 +128,10 @@ def _build_records(df, app_id, tag_id, event_name, now, gpsgate_application_id):
             }
             for r in df.itertuples(index=False)
         ]
+        trip_logger.info(
+            "trace=%s stage=db_build result=records_ready records=%d invalid_total=%d",
+            trace_id, len(records), invalid,
+        )
         return records, invalid
 
     # ---------------------------------------------------------------
@@ -188,7 +206,7 @@ def _build_records(df, app_id, tag_id, event_name, now, gpsgate_application_id):
 # Change 2: chunked INSERT (commit every CHUNK_SIZE rows)
 # ---------------------------------------------------------------------------
 
-def _chunked_insert(records, model, invalid_rows_skipped, event_name):
+def _chunked_insert(records, model, invalid_rows_skipped, event_name, trace_id=None):
     total_inserted = 0
     total_failed   = 0
 
@@ -201,9 +219,19 @@ def _chunked_insert(records, model, invalid_rows_skipped, event_name):
             total_inserted += inserted
             db.session.commit()
             logger.debug(f"[DB_STORAGE] {event_name} chunk offset={offset} size={len(chunk)} inserted={inserted}")
+            if event_name == "Trip":
+                trip_logger.info(
+                    "trace=%s stage=db_insert offset=%d chunk_size=%d inserted=%d conflict_skipped=%d",
+                    trace_id, offset, len(chunk), inserted, max(0, len(chunk) - inserted),
+                )
         except Exception:
             db.session.rollback()
             logger.exception(f"[DB_STORAGE] {event_name} chunk at offset={offset} failed")
+            if event_name == "Trip":
+                trip_logger.exception(
+                    "trace=%s stage=db_insert offset=%d chunk_size=%d result=rollback",
+                    trace_id, offset, len(chunk),
+                )
             total_failed += len(chunk)
 
     duplicate_skipped = max(0, len(records) - total_inserted)
@@ -221,7 +249,7 @@ def _chunked_insert(records, model, invalid_rows_skipped, event_name):
 # Public API
 # ---------------------------------------------------------------------------
 
-def store_event_data_to_db(df, app_id, tag_id, event_name, gpsgate_application_id):
+def store_event_data_to_db(df, app_id, tag_id, event_name, gpsgate_application_id, trace_id=None):
     logger.info(f"[DB_STORAGE] {event_name} rows={len(df)} chunk_size={CHUNK_SIZE}")
 
     if df is None or df.empty:
@@ -248,8 +276,20 @@ def store_event_data_to_db(df, app_id, tag_id, event_name, gpsgate_application_i
             "invalid_rows_skipped": 0, "duplicate_rows_skipped": 0,
         }
 
+    rows_before = None
+    if event_name == "Trip":
+        rows_before = FactTrip.query.filter_by(
+            gpsgate_application_id=gpsgate_application_id
+        ).count()
+        trip_logger.info(
+            "trace=%s stage=db_store app_id=%s db_application_id=%s rows_before=%d input_rows=%d",
+            trace_id, app_id, gpsgate_application_id, rows_before, len(df),
+        )
+
     now = datetime.utcnow()
-    records, invalid_rows_skipped = _build_records(df, app_id, tag_id, event_name, now, gpsgate_application_id)
+    records, invalid_rows_skipped = _build_records(
+        df, app_id, tag_id, event_name, now, gpsgate_application_id, trace_id=trace_id
+    )
 
     logger.info(
         f"[DB_STORAGE] {event_name} valid={len(records)} "
@@ -257,9 +297,25 @@ def store_event_data_to_db(df, app_id, tag_id, event_name, gpsgate_application_i
     )
 
     if not records:
+        if event_name == "Trip":
+            trip_logger.error(
+                "trace=%s stage=db_store result=no_records_built invalid_rows=%d rows_before=%d",
+                trace_id, invalid_rows_skipped, rows_before,
+            )
         return {
             "inserted": 0, "skipped": invalid_rows_skipped, "failed": 0,
             "invalid_rows_skipped": invalid_rows_skipped, "duplicate_rows_skipped": 0,
         }
 
-    return _chunked_insert(records, model, invalid_rows_skipped, event_name)
+    stats = _chunked_insert(
+        records, model, invalid_rows_skipped, event_name, trace_id=trace_id
+    )
+    if event_name == "Trip":
+        rows_after = FactTrip.query.filter_by(
+            gpsgate_application_id=gpsgate_application_id
+        ).count()
+        trip_logger.info(
+            "trace=%s stage=db_store rows_before=%d rows_after=%d actual_delta=%d reported_inserted=%d",
+            trace_id, rows_before, rows_after, rows_after - rows_before, stats["inserted"],
+        )
+    return stats

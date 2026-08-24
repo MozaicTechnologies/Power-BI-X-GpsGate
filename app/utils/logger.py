@@ -23,6 +23,7 @@ _COLOR_FIELD_STYLES = {
 }
 
 _shared_file_handler: logging.FileHandler | None = None
+_dedicated_file_handlers: dict[str, logging.FileHandler] = {}
 _task_file_handler: ContextVar[logging.FileHandler | None] = ContextVar(
     "task_file_handler", default=None
 )
@@ -76,6 +77,40 @@ def setup_logger(name: str, level: str = None) -> logging.Logger:
         stream=sys.stdout,
     )
 
+    return logger
+
+
+def setup_dedicated_file_logger(
+    name: str,
+    filename_prefix: str,
+    level: str = "INFO",
+) -> logging.Logger:
+    """Return a logger that writes only to its own daily diagnostic file.
+
+    The handler is shared inside the process, so importing this logger from
+    multiple pipeline modules does not duplicate lines. It intentionally has
+    no console or shared app-log handler.
+    """
+    safe_prefix = re.sub(r"[^A-Za-z0-9_.-]+", "_", filename_prefix)
+    logs_dir = "logs"
+    os.makedirs(logs_dir, exist_ok=True)
+    path = os.path.abspath(
+        os.path.join(logs_dir, f"{safe_prefix}_{datetime.now().strftime('%Y%m%d')}.log")
+    )
+
+    handler = _dedicated_file_handlers.get(path)
+    numeric_level = _get_numeric_level(level)
+    if handler is None:
+        handler = logging.FileHandler(path, encoding="utf-8")
+        handler.setLevel(numeric_level)
+        handler.setFormatter(logging.Formatter(_FMT))
+        _dedicated_file_handlers[path] = handler
+
+    logger = logging.getLogger(name)
+    logger.setLevel(numeric_level)
+    logger.propagate = False
+    if handler not in logger.handlers:
+        logger.addHandler(handler)
     return logger
 
 
