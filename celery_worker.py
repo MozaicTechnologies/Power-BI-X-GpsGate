@@ -24,10 +24,17 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from app import create_app
-from app.celery_app import celery, configure_celery
+from app.celery_app import celery
 
 flask_app = create_app()
-configure_celery(flask_app)
 
 # Register all tasks
 import app.tasks  # noqa: F401
+
+logging.getLogger("CELERY_BOOT").info(
+    "Celery ready | timezone=%s enable_utc=%s schedules=%s registered_sync_tasks=%s",
+    celery.conf.timezone,
+    celery.conf.enable_utc,
+    sorted(celery.conf.beat_schedule.keys()),
+    sorted(name for name in celery.tasks if name in {"tasks.daily_sync", "tasks.weekly_backfill"}),
+)

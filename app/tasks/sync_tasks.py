@@ -1,5 +1,6 @@
 import time
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from app.celery_app import celery
 from app.services.customer_config import EVENT_CONFIG, load_applications
@@ -7,6 +8,12 @@ from app.services.event_processor import run_event_for_dates
 from app.utils.logger import setup_logger
 
 logger = setup_logger("TASKS")
+MUSCAT_TZ = ZoneInfo("Asia/Muscat")
+
+
+def _muscat_today():
+    """Return the operational date used by scheduled GpsGate syncs."""
+    return datetime.now(MUSCAT_TZ).date()
 
 
 def _progress(self, done, total, status, **extra):
@@ -44,13 +51,13 @@ def dimension_sync_task(self, application_id=None):
 
 
 # ---------------------------------------------------------------------------
-# Daily sync  (triggered by Celery Beat every day at 02:00 UTC)
+# Daily sync  (triggered by Celery Beat every day at 02:00 Muscat)
 # ---------------------------------------------------------------------------
 
 @celery.task(bind=True, name="tasks.daily_sync", track_started=True)
 def daily_sync_task(self):
     t0 = time.time()
-    today = datetime.utcnow().date()
+    today = _muscat_today()
     start_date = end_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
 
     logger.info("[daily_sync] STARTED | task_id=%s | date=%s", self.request.id, start_date)
@@ -130,13 +137,13 @@ def daily_sync_task(self):
 
 
 # ---------------------------------------------------------------------------
-# Weekly backfill  (triggered by Celery Beat every Monday at 03:00 UTC)
+# Weekly backfill  (triggered by Celery Beat every Monday at 03:00 Muscat)
 # ---------------------------------------------------------------------------
 
 @celery.task(bind=True, name="tasks.weekly_backfill", track_started=True)
 def weekly_backfill_task(self):
     t0 = time.time()
-    today = datetime.utcnow().date()
+    today = _muscat_today()
     end_date = today - timedelta(days=1)
     start_date = end_date - timedelta(days=6)
     start_str = start_date.strftime("%Y-%m-%d")
