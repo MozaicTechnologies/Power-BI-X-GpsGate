@@ -483,6 +483,11 @@ def process_event_data(event_name, response_key):
                     continue
 
             # ---------------- DOWNLOAD ----------------
+            if event_name == "Trip":
+                trip_logger.info(
+                    "trace=%s stage=result_output csv_url=%s",
+                    trace_id, gdrive_link,
+                )
             headers = {"Authorization": token} if "omantracking2.com" in gdrive_link else {}
             csv_bytes = download_with_retry(gdrive_link, headers)
             if event_name == "Trip":
