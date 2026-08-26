@@ -120,7 +120,7 @@ class JobLog(db.Model):
     id                = db.Column(db.Integer, primary_key=True)
     task_id           = db.Column(db.String(64), unique=True, index=True, nullable=False)
     job_type          = db.Column(db.String(64), nullable=False)
-    status            = db.Column(db.String(20),  nullable=False, default="running")  # running / completed / failed
+    status            = db.Column(db.String(20),  nullable=False, default="running")  # queued / running / cancel_requested / cancelled / completed / failed
     application_id    = db.Column(db.Integer,   nullable=True)
     started_at        = db.Column(db.DateTime(timezone=True), default=_utcnow, index=True)
     completed_at      = db.Column(db.DateTime(timezone=True), nullable=True)

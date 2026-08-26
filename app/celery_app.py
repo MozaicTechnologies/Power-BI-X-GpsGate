@@ -3,6 +3,25 @@ from datetime import datetime, timezone
 
 celery = Celery("power_bi_gpsgate")
 
+
+class TaskCancelled(RuntimeError):
+    """Raised at safe checkpoints when a user requests cancellation."""
+
+
+def raise_if_cancel_requested(task_id):
+    """Cooperatively stop a task without terminating a worker process."""
+    if not task_id:
+        return
+    from app.models import db, JobLog
+
+    status = (
+        db.session.query(JobLog.status)
+        .filter(JobLog.task_id == str(task_id))
+        .scalar()
+    )
+    if status in {"cancel_requested", "cancelled"}:
+        raise TaskCancelled("Cancelled by user")
+
 # Maps task short-name → positional index of application_id in args (0-based, excluding self)
 _APPID_ARG_INDEX = {
     "dimension_sync": 0,
@@ -47,19 +66,33 @@ def configure_celery(app):
 
             with app.app_context():
                 # ── record job start ──────────────────────────────────────
-                log = JobLog(
-                    task_id=task_id,
-                    job_type=job_type,
-                    status="running",
-                    application_id=application_id,
-                    started_at=datetime.now(timezone.utc),
-                    job_metadata={
-                        "application_id": application_id,
-                        "start_date": start_date,
-                        "end_date": end_date,
-                    },
-                )
-                db.session.add(log)
+                log = JobLog.query.filter_by(task_id=task_id).first()
+                if log and log.status in {"cancel_requested", "cancelled"}:
+                    log.status = "cancelled"
+                    log.completed_at = datetime.now(timezone.utc)
+                    log.error_message = "Cancelled before execution"
+                    db.session.commit()
+                    raise TaskCancelled("Cancelled before execution")
+
+                if log:
+                    log.status = "running"
+                    log.started_at = datetime.now(timezone.utc)
+                    log.completed_at = None
+                    log.error_message = None
+                else:
+                    log = JobLog(
+                        task_id=task_id,
+                        job_type=job_type,
+                        status="running",
+                        application_id=application_id,
+                        started_at=datetime.now(timezone.utc),
+                        job_metadata={
+                            "application_id": application_id,
+                            "start_date": start_date,
+                            "end_date": end_date,
+                        },
+                    )
+                    db.session.add(log)
                 try:
                     db.session.commit()
                 except Exception:
@@ -68,6 +101,18 @@ def configure_celery(app):
                 # ── run the actual task ───────────────────────────────────
                 try:
                     result = self.run(*args, **kwargs)
+                    raise_if_cancel_requested(task_id)
+                except TaskCancelled as exc:
+                    try:
+                        entry = JobLog.query.filter_by(task_id=task_id).first()
+                        if entry:
+                            entry.status = "cancelled"
+                            entry.completed_at = datetime.now(timezone.utc)
+                            entry.error_message = str(exc)[:2000]
+                            db.session.commit()
+                    except Exception:
+                        db.session.rollback()
+                    raise
                 except Exception as exc:
                     try:
                         entry = JobLog.query.filter_by(task_id=task_id).first()

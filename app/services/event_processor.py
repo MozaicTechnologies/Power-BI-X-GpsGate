@@ -6,6 +6,7 @@ Must be called within a Flask app context.
 
 import json
 import logging
+from celery import current_task
 from datetime import datetime, timedelta
 from flask import current_app
 
@@ -50,6 +51,9 @@ def run_event_for_dates(event_type: str, start_date: str, end_date: str, custome
         "period_start": f"{start_date}T00:00:00Z",
         "period_end": f"{end_date}T23:59:59Z",
     }
+    task_id = getattr(getattr(current_task, "request", None), "id", None)
+    if task_id:
+        payload["celery_task_id"] = str(task_id)
     if runtime.event_id:
         payload["event_id"] = runtime.event_id
 

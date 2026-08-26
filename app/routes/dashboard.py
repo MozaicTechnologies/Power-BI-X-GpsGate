@@ -11,6 +11,7 @@ from urllib.parse import urljoin
 import traceback
 import requests
 import os
+from uuid import uuid4
 from app.models import (
     db,
     GpsGateApplication,
@@ -101,6 +102,42 @@ def serialize_gpsgate_application(app: GpsGateApplication) -> dict:
         "wu_event_id": app.wu_event_id,
         "wh_event_id": app.wh_event_id,
     }
+
+
+def _enqueue_tracked_task(task, args, application_id=None, start_date=None, end_date=None):
+    """Persist a queued job before publishing it, so offline workers are visible."""
+    from datetime import timezone as _tz
+    from app.models import JobLog
+
+    task_id = str(uuid4())
+    try:
+        normalized_app_id = int(application_id) if application_id is not None else None
+    except (TypeError, ValueError):
+        normalized_app_id = None
+
+    entry = JobLog(
+        task_id=task_id,
+        job_type=task.name.replace('tasks.', ''),
+        status='queued',
+        application_id=normalized_app_id,
+        started_at=datetime.now(_tz.utc),
+        job_metadata={
+            'application_id': normalized_app_id,
+            'start_date': start_date,
+            'end_date': end_date,
+        },
+    )
+    db.session.add(entry)
+    db.session.commit()
+
+    try:
+        return task.apply_async(args=args, task_id=task_id)
+    except Exception as exc:
+        entry.status = 'failed'
+        entry.completed_at = datetime.now(_tz.utc)
+        entry.error_message = f'Failed to publish task: {exc}'[:2000]
+        db.session.commit()
+        raise
 
 
 def get_dashboard_application(application_id: int | None = None) -> GpsGateApplication:
@@ -343,7 +380,11 @@ def trigger_dimension_sync():
         from app.tasks.sync_tasks import dimension_sync_task
         data = request.get_json() or {}
         application_id = str(data.get('application_id', '')).strip() or None
-        task = dimension_sync_task.delay(application_id)
+        task = _enqueue_tracked_task(
+            dimension_sync_task,
+            (application_id,),
+            application_id=application_id,
+        )
         return jsonify({'success': True, 'task_id': task.id}), 202
     except Exception as e:
         logger.error(f"trigger_dimension_sync failed: {e}")
@@ -363,7 +404,13 @@ def trigger_fact_sync():
             return jsonify({'success': False, 'error': 'start_date and end_date are required'}), 400
         datetime.strptime(start_date, '%Y-%m-%d')
         datetime.strptime(end_date, '%Y-%m-%d')
-        task = fact_sync_task.delay(start_date, end_date, application_id)
+        task = _enqueue_tracked_task(
+            fact_sync_task,
+            (start_date, end_date, application_id),
+            application_id=application_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
         return jsonify({'success': True, 'task_id': task.id}), 202
     except ValueError:
         return jsonify({'success': False, 'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
@@ -385,7 +432,13 @@ def trigger_full_backfill():
             return jsonify({'success': False, 'error': 'start_date and end_date are required'}), 400
         datetime.strptime(start_date, '%Y-%m-%d')
         datetime.strptime(end_date, '%Y-%m-%d')
-        task = full_backfill_task.delay(start_date, end_date, application_id)
+        task = _enqueue_tracked_task(
+            full_backfill_task,
+            (start_date, end_date, application_id),
+            application_id=application_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
         return jsonify({'success': True, 'task_id': task.id}), 202
     except ValueError:
         return jsonify({'success': False, 'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
@@ -397,29 +450,33 @@ def trigger_full_backfill():
 @dashboard_bp.route('/task/<task_id>/cancel', methods=['POST'])
 @login_required
 def cancel_task(task_id):
-    """Revoke a running or queued Celery task."""
-    from celery.result import AsyncResult
+    """Request cooperative cancellation without killing a worker process."""
     from app.models import JobLog
     try:
         from app.celery_app import celery
-        ar = AsyncResult(task_id)
-        # terminate=True sends SIGTERM to the worker process running it
-        celery.control.revoke(task_id, terminate=True, signal='SIGTERM')
+        from datetime import timezone as _tz
 
-        # Mark as failed in JobLog if it exists
-        try:
-            entry = JobLog.query.filter_by(task_id=task_id).first()
-            if entry and entry.status == 'running':
-                from datetime import timezone as _tz
-                entry.status        = 'failed'
-                entry.completed_at  = datetime.now(_tz.utc)
-                entry.error_message = 'Cancelled by user'
-                db.session.commit()
-        except Exception:
-            db.session.rollback()
+        entry = JobLog.query.filter_by(task_id=task_id).first()
+        if not entry:
+            return jsonify({'success': False, 'error': 'Task was not found in job history'}), 404
 
-        logger.info("cancel_task | task_id=%s state=%s", task_id, ar.state)
-        return jsonify({'success': True, 'task_id': task_id})
+        if entry.status in {'completed', 'failed', 'cancelled'}:
+            return jsonify({'success': True, 'task_id': task_id, 'status': entry.status})
+
+        # This prevents queued tasks from starting. Running tasks stop at the
+        # next cooperative checkpoint; no SIGTERM is sent to the worker.
+        celery.control.revoke(task_id, terminate=False)
+        if entry.status == 'queued':
+            entry.status = 'cancelled'
+            entry.completed_at = datetime.now(_tz.utc)
+            entry.error_message = 'Cancelled before execution'
+        else:
+            entry.status = 'cancel_requested'
+            entry.error_message = 'Cancellation requested by user'
+        db.session.commit()
+
+        logger.info("cancel_task | task_id=%s status=%s terminate=false", task_id, entry.status)
+        return jsonify({'success': True, 'task_id': task_id, 'status': entry.status})
     except Exception as e:
         logger.error("cancel_task | task_id=%s error=%s", task_id, e)
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -552,7 +609,7 @@ def get_recent_jobs():
 
     # Sort: running/queued first, then by started_at desc
     def _sort_key(j):
-        order = {'running': 0, 'queued': 1, 'completed': 2, 'failed': 2}
+        order = {'running': 0, 'cancel_requested': 1, 'queued': 2, 'completed': 3, 'failed': 3, 'cancelled': 3}
         ts = j.get('started_at') or ''
         return (order.get(j['status'], 3), ts)
 

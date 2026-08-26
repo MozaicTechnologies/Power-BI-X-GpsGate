@@ -20,6 +20,7 @@ import uuid
 from app.utils.logger import setup_dedicated_file_logger, setup_logger
 
 from app.models import db, Render, Result, GpsGateApplication
+from app.celery_app import TaskCancelled, raise_if_cancel_requested
 from app.services.db_storage import store_event_data_to_db
 from app.services.gpsgate_reports import create_report_render, wait_for_report_result
 
@@ -261,6 +262,11 @@ def process_event_data(event_name, response_key):
     base_url = data.get("base_url")
     tag_id = data.get("tag_id")
     event_id = data.get("event_id")
+    celery_task_id = data.get("celery_task_id")
+
+    def check_cancelled():
+        if celery_task_id:
+            raise_if_cancel_requested(celery_task_id)
 
     report_id = data.get("report_id")
 
@@ -310,6 +316,7 @@ def process_event_data(event_name, response_key):
 
     for week in weeks:
         try:
+            check_cancelled()
             render_id = None
             successful_report_id = None
             if event_name == "Trip":
@@ -325,6 +332,7 @@ def process_event_data(event_name, response_key):
                 report_ids_to_try = fallback_report_ids.get(event_name, fallback_report_ids["default"])
             
             for try_report_id in report_ids_to_try:
+                check_cancelled()
                 logger.info(f"Trying report_id={try_report_id} for event={event_name}")
                 
                 # ---------------- RENDER ----------------
@@ -445,7 +453,10 @@ def process_event_data(event_name, response_key):
                     logger.info(
                         f"Result poll attempt={attempt}/3 event={event_name} render_id={render_id}"
                     )
-                    result_data, result_status = wait_for_report_result(payload)
+                    result_data, result_status = wait_for_report_result(
+                        payload,
+                        cancel_check=check_cancelled,
+                    )
                     if event_name == "Trip":
                         trip_logger.log(
                             20 if result_status == 200 else 30,
@@ -483,6 +494,7 @@ def process_event_data(event_name, response_key):
                     continue
 
             # ---------------- DOWNLOAD ----------------
+            check_cancelled()
             if event_name == "Trip":
                 trip_logger.info(
                     "trace=%s stage=result_output csv_url=%s",
@@ -508,6 +520,7 @@ def process_event_data(event_name, response_key):
             totals["raw"] += len(raw_df)
 
             # ---------------- STORE ----------------
+            check_cancelled()
             stats = store_event_data_to_db(
                 raw_df, app_id, tag_id, event_name, gpsgate_application_id, trace_id=trace_id
             )
@@ -533,6 +546,12 @@ def process_event_data(event_name, response_key):
 
             weeks_processed += 1
 
+        except TaskCancelled:
+            logger.warning(
+                "Pipeline cancellation checkpoint reached event=%s task_id=%s",
+                event_name, celery_task_id,
+            )
+            raise
         except Exception as e:
             logger.exception(f"{event_name} week failed: {e}")
             if event_name == "Trip":

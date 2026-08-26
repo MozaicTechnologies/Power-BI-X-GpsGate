@@ -1,6 +1,6 @@
 import time
 
-from app.celery_app import celery
+from app.celery_app import TaskCancelled, celery, raise_if_cancel_requested
 from app.services.customer_config import EVENT_CONFIG, load_applications
 from app.services.event_processor import iter_week_ranges, run_event_for_dates
 from app.utils.logger import setup_logger
@@ -22,6 +22,7 @@ def _get_application(application_id):
 
 
 def _progress(self, done, total, status, **extra):
+    raise_if_cancel_requested(self.request.id)
     percent = int(done / total * 100) if total else 0
     self.update_state(
         state="PROGRESS",
@@ -77,6 +78,8 @@ def fact_sync_task(self, start_date: str, end_date: str, application_id=None):
                     "[fact_sync] EVENT OK | app=%s | week=%s | event=%s | inserted=%d skipped=%d failed=%d",
                     application_id, week_key, et, ins, skip, fail,
                 )
+            except TaskCancelled:
+                raise
             except Exception as exc:
                 week_results[et] = {"status": "failed", "error": str(exc)}
                 total_failed += 1
@@ -138,8 +141,20 @@ def _run_full_backfill(self, start_date: str, end_date: str, application_id=None
     _progress(self, done, total_steps, "Syncing dimension tables…", phase="dimensions")
     try:
         from app.services.sync_dimensions import main as sync_main
-        dim_records = sync_main(application_id) or 0
+
+        def on_progress(status, current, total, percent=None):
+            raise_if_cancel_requested(self.request.id)
+            if percent is None:
+                percent = int(current / total * 100) if total else 0
+            self.update_state(
+                state="PROGRESS",
+                meta={"percent": percent, "status": status, "current": current, "total": total},
+            )
+
+        dim_records = sync_main(application_id, on_progress=on_progress) or 0
         logger.info("[full_backfill] DIM_SYNC DONE | app=%s | records=%d", application_id, dim_records)
+    except TaskCancelled:
+        raise
     except Exception:
         logger.exception("[full_backfill] DIM_SYNC FAILED | app=%s", application_id)
         dim_records = 0
@@ -174,6 +189,8 @@ def _run_full_backfill(self, start_date: str, end_date: str, application_id=None
                     "[full_backfill] EVENT OK | app=%s | week=%s | event=%s | inserted=%d skipped=%d failed=%d",
                     application_id, week_key, et, ins, skip, fail,
                 )
+            except TaskCancelled:
+                raise
             except Exception as exc:
                 week_results[et] = {"status": "failed", "error": str(exc)}
                 total_failed += 1

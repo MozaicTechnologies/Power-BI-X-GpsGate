@@ -343,6 +343,8 @@ function _jobStatusBadge(status) {
     const map = {
         running:   { icon: '⚙️', label: 'Running',   color: '#0d6efd' },
         queued:    { icon: '⏳', label: 'Queued',    color: '#fd7e14' },
+        cancel_requested: { icon: '🛑', label: 'Stopping', color: '#6f42c1' },
+        cancelled: { icon: '⛔', label: 'Cancelled', color: '#6c757d' },
         completed: { icon: '✅', label: 'Completed', color: '#198754' },
         failed:    { icon: '❌', label: 'Failed',    color: '#dc3545' },
     };
@@ -415,7 +417,7 @@ function _renderJobCard(job) {
         ? `<div style="color:#dc3545;font-size:0.82rem;margin-top:5px;word-break:break-word;">⚠ ${job.error_message}</div>`
         : '';
 
-    const borderColor = { running:'#0d6efd', queued:'#fd7e14', completed:'#198754', failed:'#dc3545' }[job.status] || '#ccc';
+    const borderColor = { running:'#0d6efd', queued:'#fd7e14', cancel_requested:'#6f42c1', cancelled:'#6c757d', completed:'#198754', failed:'#dc3545' }[job.status] || '#ccc';
 
     const cancelBtn = (job.status === 'running' || job.status === 'queued')
         ? `<button onclick="cancelJob('${job.id}', this)"

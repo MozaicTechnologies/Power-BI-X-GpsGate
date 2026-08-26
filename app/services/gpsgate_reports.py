@@ -114,7 +114,7 @@ def create_report_render(payload: dict) -> tuple[dict, int]:
     }, 502
 
 
-def wait_for_report_result(payload: dict, *, max_wait_s: int = 300) -> tuple[dict, int]:
+def wait_for_report_result(payload: dict, *, max_wait_s: int = 300, cancel_check=None) -> tuple[dict, int]:
     """Poll GpsGate directly until a rendering is ready."""
     base_url = (payload.get("base_url") or "").strip().rstrip("/")
     token = payload.get("token")
@@ -136,6 +136,8 @@ def wait_for_report_result(payload: dict, *, max_wait_s: int = 300) -> tuple[dic
     headers = {"Accept": "application/json", "Authorization": token}
     waited, sleep_s = 0, 2
     while waited < max_wait_s:
+        if cancel_check:
+            cancel_check()
         try:
             response = requests.get(status_url, headers=headers, timeout=RESULT_REQUEST_TIMEOUT)
             if response.status_code != 200:
@@ -155,6 +157,8 @@ def wait_for_report_result(payload: dict, *, max_wait_s: int = 300) -> tuple[dic
         except Exception:
             result_logger.exception("fetch_result | EXCEPTION | app_id=%s rendering_id=%s waited=%ds", app_id, rendering_id, waited)
 
+        if cancel_check:
+            cancel_check()
         time.sleep(sleep_s)
         waited += sleep_s
         sleep_s = min(10, sleep_s * 1.5)

@@ -2,7 +2,7 @@ import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from app.celery_app import celery
+from app.celery_app import TaskCancelled, celery, raise_if_cancel_requested
 from app.services.customer_config import EVENT_CONFIG, load_applications
 from app.services.event_processor import run_event_for_dates
 from app.utils.logger import setup_logger
@@ -17,6 +17,7 @@ def _muscat_today():
 
 
 def _progress(self, done, total, status, **extra):
+    raise_if_cancel_requested(self.request.id)
     percent = int(done / total * 100) if total else 0
     self.update_state(
         state="PROGRESS",
@@ -36,6 +37,7 @@ def dimension_sync_task(self, application_id=None):
     from app.services.sync_dimensions import main as sync_main
 
     def on_progress(status, current, total, percent=None):
+        raise_if_cancel_requested(self.request.id)
         if percent is None:
             percent = int(current / total * 100) if total else 0
         self.update_state(
@@ -65,8 +67,20 @@ def daily_sync_task(self):
 
     try:
         from app.services.sync_dimensions import main as sync_dimensions
-        dim_records = sync_dimensions() or 0
+
+        def on_progress(status, current, total, percent=None):
+            raise_if_cancel_requested(self.request.id)
+            if percent is None:
+                percent = int(current / total * 100) if total else 0
+            self.update_state(
+                state="PROGRESS",
+                meta={"percent": percent, "status": status, "current": current, "total": total},
+            )
+
+        dim_records = sync_dimensions(on_progress=on_progress) or 0
         logger.info("[daily_sync] DIM_SYNC DONE | date=%s | records=%d", start_date, dim_records)
+    except TaskCancelled:
+        raise
     except Exception:
         logger.exception("[daily_sync] DIM_SYNC FAILED | date=%s", start_date)
         dim_records = 0
@@ -102,6 +116,8 @@ def daily_sync_task(self):
                 total_failed   += fail
                 logger.info("[daily_sync] EVENT OK | app=%s | event=%s | date=%s | inserted=%d skipped=%d failed=%d",
                             app.application_id, et, start_date, ins, skip, fail)
+            except TaskCancelled:
+                raise
             except Exception as exc:
                 app_results[et] = {"status": "failed", "error": str(exc)}
                 total_failed += 1
@@ -184,6 +200,8 @@ def weekly_backfill_task(self):
                     "[weekly_backfill] EVENT OK | app=%s | event=%s | range=%s→%s | inserted=%d skipped=%d failed=%d",
                     app.application_id, et, start_str, end_str, ins, skip, fail,
                 )
+            except TaskCancelled:
+                raise
             except Exception as exc:
                 app_results[et] = {"status": "failed", "error": str(exc)}
                 total_failed += 1
