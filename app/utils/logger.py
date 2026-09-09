@@ -22,11 +22,48 @@ _COLOR_FIELD_STYLES = {
 
 _shared_file_handler: logging.FileHandler | None = None
 _dedicated_file_handlers: dict[str, logging.FileHandler] = {}
+LOG_FILES_TO_KEEP = max(1, int(os.getenv("LOG_FILES_TO_KEEP", "2")))
 
 
 def _get_numeric_level(level: str | None = None) -> int:
     name = (level or os.getenv("LOG_LEVEL", "INFO")).upper()
     return getattr(logging, name, logging.INFO)
+
+
+def _cleanup_old_log_files(logs_dir: str, filename_prefix: str, current_file: str) -> None:
+    """Keep only the newest configured number of files for one log prefix."""
+    current_path = os.path.abspath(current_file)
+    try:
+        candidates = [
+            os.path.abspath(os.path.join(logs_dir, entry.name))
+            for entry in os.scandir(logs_dir)
+            if entry.is_file()
+            and entry.name.startswith(f"{filename_prefix}_")
+            and entry.name.endswith(".log")
+        ]
+        candidates.sort(
+            key=lambda path: (os.path.getmtime(path), path),
+            reverse=True,
+        )
+
+        keep = {current_path}
+        for path in candidates:
+            if len(keep) >= LOG_FILES_TO_KEEP:
+                break
+            keep.add(path)
+
+        for path in candidates:
+            if path not in keep:
+                try:
+                    os.remove(path)
+                except FileNotFoundError:
+                    # Another web/worker process may have cleaned it first.
+                    pass
+    except OSError:
+        # Logging initialization must never stop the application from starting.
+        logging.getLogger(__name__).exception(
+            "Failed to clean old log files for prefix=%s", filename_prefix
+        )
 
 
 def _get_file_handler() -> logging.FileHandler:
@@ -39,6 +76,7 @@ def _get_file_handler() -> logging.FileHandler:
         h.setLevel(_get_numeric_level())
         h.setFormatter(logging.Formatter(_FMT))
         _shared_file_handler = h
+        _cleanup_old_log_files(logs_dir, "app", log_file)
     return _shared_file_handler
 
 
@@ -97,6 +135,7 @@ def setup_dedicated_file_logger(
         handler.setLevel(numeric_level)
         handler.setFormatter(logging.Formatter(_FMT))
         _dedicated_file_handlers[path] = handler
+        _cleanup_old_log_files(logs_dir, safe_prefix, path)
 
     logger = logging.getLogger(name)
     logger.setLevel(numeric_level)
