@@ -9,6 +9,9 @@ trip_logger = setup_dedicated_file_logger("TRIP_PIPELINE", "trip_pipeline")
 
 # Change 2: number of rows per INSERT batch
 CHUNK_SIZE = 5_000
+# PostgreSQL/psycopg rejects statements with more than 65,535 bind parameters.
+# Keep some headroom for SQLAlchemy-injected defaults such as is_duplicate.
+MAX_INSERT_PARAMETERS = 60_000
 
 
 # ---------------------------------------------------------------------------
@@ -206,12 +209,31 @@ def _build_records(df, app_id, tag_id, event_name, now, gpsgate_application_id, 
 # Change 2: chunked INSERT (commit every CHUNK_SIZE rows)
 # ---------------------------------------------------------------------------
 
+def _effective_chunk_size(records, model):
+    """Choose a batch size that stays below PostgreSQL's bind limit."""
+    if not records:
+        return CHUNK_SIZE
+
+    # Counting all model columns is deliberately conservative: SQLAlchemy may
+    # bind client-side defaults even when they are absent from record dicts.
+    parameters_per_row = max(1, len(model.__table__.columns))
+    parameter_safe_size = max(1, MAX_INSERT_PARAMETERS // parameters_per_row)
+    return min(CHUNK_SIZE, parameter_safe_size)
+
+
 def _chunked_insert(records, model, invalid_rows_skipped, event_name, trace_id=None):
     total_inserted = 0
     total_failed   = 0
+    chunk_size = _effective_chunk_size(records, model)
 
-    for offset in range(0, len(records), CHUNK_SIZE):
-        chunk = records[offset : offset + CHUNK_SIZE]
+    logger.info(
+        "[DB_STORAGE] %s insert_plan records=%d columns=%d chunk_size=%d max_params=%d",
+        event_name, len(records), len(model.__table__.columns), chunk_size,
+        MAX_INSERT_PARAMETERS,
+    )
+
+    for offset in range(0, len(records), chunk_size):
+        chunk = records[offset : offset + chunk_size]
         try:
             stmt = pg_insert(model).values(chunk).on_conflict_do_nothing()
             result = db.session.execute(stmt)
@@ -234,7 +256,8 @@ def _chunked_insert(records, model, invalid_rows_skipped, event_name, trace_id=N
                 )
             total_failed += len(chunk)
 
-    duplicate_skipped = max(0, len(records) - total_inserted)
+    successfully_attempted = max(0, len(records) - total_failed)
+    duplicate_skipped = max(0, successfully_attempted - total_inserted)
     total_skipped     = invalid_rows_skipped + duplicate_skipped
     return {
         "inserted":              total_inserted,
@@ -250,7 +273,7 @@ def _chunked_insert(records, model, invalid_rows_skipped, event_name, trace_id=N
 # ---------------------------------------------------------------------------
 
 def store_event_data_to_db(df, app_id, tag_id, event_name, gpsgate_application_id, trace_id=None):
-    logger.info(f"[DB_STORAGE] {event_name} rows={len(df)} chunk_size={CHUNK_SIZE}")
+    logger.info(f"[DB_STORAGE] {event_name} rows={len(df)} max_chunk_size={CHUNK_SIZE}")
 
     if df is None or df.empty:
         return {
